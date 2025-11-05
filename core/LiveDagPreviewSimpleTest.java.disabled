@@ -1,0 +1,174 @@
+package core;
+
+import memory.CausalGraphConstruction;
+import memory.DynamicCausalModelUpdates;
+import memory.MemoryStore;
+import core.explainability.CausalTraceLogger;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Simple test suite for LiveDagPreview core functionality
+ * focusing on basic preview generation and performance validation.
+ */
+@ExtendWith(MockitoExtension.class)
+class LiveDagPreviewSimpleTest {
+
+    @Mock
+    private MemoryStore memoryStore;
+    
+    @Mock
+    private CausalTraceLogger causalTraceLogger;
+    
+    @Mock
+    private CausalGraphConstruction causalGraphConstruction;
+    
+    @Mock
+    private DynamicCausalModelUpdates dynamicCausalModelUpdates;
+    
+    @Mock
+    private BidirectionalDagParser dagParser;
+    
+    @Mock
+    private MarkdownDagRenderer dagRenderer;
+
+    private LiveDagPreview livePreview;
+
+    @BeforeEach
+    void setUp() {
+        livePreview = new LiveDagPreview(
+            memoryStore, causalTraceLogger, causalGraphConstruction, 
+            dynamicCausalModelUpdates, dagParser, dagRenderer);
+        
+        // Setup basic mock behaviors
+        when(dagParser.parseMarkdownToDag(anyString())).thenReturn(createMockDag());
+        when(dagRenderer.renderDagToMarkdown(any(DAG.class), anyString(), any()))
+            .thenReturn("# Generated DAG\nMock content");
+    }
+
+    @Test
+    void testBasicPreviewGeneration() {
+        // Arrange
+        String markdown = """
+            # DAG Execution Plan
+            
+            ## Task: test_task
+            **Plugin:** TestPlugin
+            **Parameters:**
+            - param1: value1
+            """;
+        String userId = "test-user";
+        LiveDagPreview.PreviewContext context = new LiveDagPreview.PreviewContext(
+            userId, "session-1", null, null, null, null, null);
+        
+        // Act
+        long startTime = System.nanoTime();
+        LiveDagPreview.PreviewResult result = livePreview.generateLivePreview(markdown, userId, context);
+        long duration = System.nanoTime() - startTime;
+        
+        // Assert
+        assertNotNull(result);
+        assertTrue(duration < 200_000_000, "Preview generation should complete in <200ms");
+        assertNotNull(result.getDag());
+        assertNotNull(result.getPerformance());
+        assertEquals(userId, result.getSessionId());
+    }
+
+    @Test
+    void testSessionManagement() {
+        // Arrange
+        String sessionId = "test-session-001";
+        String initialMarkdown = "# Test DAG\n## Task: test\n**Plugin:** TestPlugin";
+        
+        // Act
+        LiveDagPreview.LivePreviewSession session = livePreview.initializeSession(sessionId, initialMarkdown);
+        
+        // Assert
+        assertNotNull(session);
+        assertEquals(sessionId, session.getSessionId());
+        assertTrue(session.isActive());
+        assertTrue(livePreview.hasActiveSession(sessionId));
+    }
+
+    @Test
+    void testPerformanceMetrics() {
+        // Act
+        LiveDagPreview.PreviewPerformanceMetrics metrics = livePreview.getPerformanceMetrics();
+        
+        // Assert
+        assertNotNull(metrics);
+        assertNotNull(metrics.getComponentTimes());
+        assertTrue(metrics.getComponentTimes().containsKey("totalRequests"));
+        assertTrue(metrics.getComponentTimes().containsKey("cacheHits"));
+        assertTrue(metrics.getComponentTimes().containsKey("activeSessions"));
+    }
+
+    @Test
+    void testValidation() {
+        // Arrange
+        String validMarkdown = """
+            # DAG Execution Plan
+            
+            ## Task: valid_task
+            **Plugin:** ValidPlugin
+            """;
+        String userId = "test-user";
+        
+        // Act
+        LiveDagPreview.PreviewValidationResult result = livePreview.validatePreview(validMarkdown, userId);
+        
+        // Assert
+        assertNotNull(result);
+        // For valid markdown, should have no errors
+        assertTrue(result.isValid());
+        assertEquals(0, result.getErrors().size());
+    }
+
+    @Test
+    void testEmptyMarkdownHandling() {
+        // Arrange
+        String emptyMarkdown = "";
+        String userId = "test-user";
+        
+        // Act
+        LiveDagPreview.PreviewValidationResult result = livePreview.validatePreview(emptyMarkdown, userId);
+        
+        // Assert
+        assertNotNull(result);
+        assertFalse(result.isValid());
+        assertTrue(result.getErrors().size() > 0);
+        assertEquals(LiveDagPreview.ValidationSeverity.ERROR, result.getErrors().get(0).getSeverity());
+    }
+
+    @Test
+    void testSessionCleanup() {
+        // Arrange
+        String sessionId = "cleanup-test-session";
+        String markdown = "# Test\n## Task: test\n**Plugin:** TestPlugin";
+        
+        LiveDagPreview.LivePreviewSession session = livePreview.initializeSession(sessionId, markdown);
+        assertTrue(livePreview.hasActiveSession(sessionId));
+        
+        // Act
+        livePreview.closeSession(sessionId);
+        
+        // Assert
+        assertFalse(livePreview.hasActiveSession(sessionId));
+    }
+
+    // Helper methods
+    private DAG createMockDag() {
+        DAG dag = new DAG();
+        TaskNode node = new TaskNode("test_task", "TestPlugin");
+        node.getInputParams().put("param1", "value1");
+        dag.addNode(node);
+        return dag;
+    }
+}

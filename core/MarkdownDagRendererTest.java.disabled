@@ -1,0 +1,696 @@
+package core;
+
+import memory.CausalGraphConstruction;
+import memory.DynamicCausalModelUpdates;
+import memory.TemporalConstraintProcessor;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Comprehensive test suite for MarkdownDagRenderer - DAG to Markdown conversion
+ * with CADR insights integration and real-time performance validation.
+ * 
+ * Phase 26.1b: MarkdownNativePromptInterface Backend Testing
+ * Target: <50ms rendering performance, 95%+ code coverage
+ */
+@ExtendWith(MockitoExtension.class)
+class MarkdownDagRendererTest {
+
+    @Mock
+    private CausalGraphConstruction causalGraphConstruction;
+    
+    @Mock
+    private DynamicCausalModelUpdates dynamicCausalModelUpdates;
+    
+    @Mock
+    private TemporalConstraintProcessor temporalConstraintProcessor;
+
+    private MarkdownDagRenderer rendererWithCADR;
+    private MarkdownDagRenderer renderer;
+    
+    private ExecutorService executorService;
+
+    @BeforeEach
+    void setUp() {
+        // Setup mocks with proper behavior
+        setupCausalGraphConstructionMock();
+        setupTemporalConstraintProcessorMock();
+        setupDynamicCausalModelUpdatesMock();
+        
+        // Create renderers
+        renderer = new MarkdownDagRenderer(); // Basic renderer without CADR
+        rendererWithCADR = new MarkdownDagRenderer(causalGraphConstruction, 
+                                                  temporalConstraintProcessor, 
+                                                  dynamicCausalModelUpdates);
+        executorService = Executors.newFixedThreadPool(10);
+    }
+    
+    private void setupCausalGraphConstructionMock() {
+        // Setup default behavior to prevent NPEs
+        CausalGraphConstruction.CausalGraph mockGraph = mock(CausalGraphConstruction.CausalGraph.class);
+        when(mockGraph.getNodeCount()).thenReturn(0);
+        when(mockGraph.getEdgeCount()).thenReturn(0);
+        when(mockGraph.getCoherenceScore()).thenReturn(0.0);
+        
+        when(causalGraphConstruction.getUserCausalGraphWithUpdates(any())).thenReturn(mockGraph);
+        when(causalGraphConstruction.getStrongCausalRelationships(any(), anyDouble())).thenReturn(Collections.emptyList());
+    }
+    
+    private void setupTemporalConstraintProcessorMock() {
+        // Setup default parse result
+        TemporalConstraintProcessor.ParseResult mockResult = mock(TemporalConstraintProcessor.ParseResult.class);
+        when(mockResult.getConstraint()).thenReturn(null);
+        
+        when(temporalConstraintProcessor.parseTemporalExpression(anyString(), any(), any())).thenReturn(mockResult);
+    }
+    
+    private void setupDynamicCausalModelUpdatesMock() {
+        // Setup default behavior using actual method signatures
+        when(dynamicCausalModelUpdates.getCausalStrength(anyString())).thenReturn(null);
+        when(dynamicCausalModelUpdates.getUpdatedCausalStrengths(anyString())).thenReturn(Collections.emptyMap());
+        when(dynamicCausalModelUpdates.getRecentObservations(anyString(), anyInt())).thenReturn(Collections.emptyList());
+        when(dynamicCausalModelUpdates.getStatistics()).thenReturn(Collections.emptyMap());
+    }
+    
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(1000, TimeUnit.MILLISECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    @Test
+    void testSimpleLinearDagRendering() {
+        // Arrange
+        DAG dag = createLinearDag("task1", "task2", "task3");
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act
+        long startTime = System.nanoTime();
+        String markdown = renderer.renderDagToMarkdown(dag, options);
+        long duration = System.nanoTime() - startTime;
+        
+        // Assert
+        assertTrue(duration < 50_000_000, "Rendering should complete in <50ms");
+        assertNotNull(markdown);
+        assertTrue(markdown.contains("# 📋 Detailed DAG Execution Plan"), "Should contain header");
+        assertTrue(markdown.contains("Node: `task1`"), "Should contain task1");
+        assertTrue(markdown.contains("Node: `task2`"), "Should contain task2");
+        assertTrue(markdown.contains("Node: `task3`"), "Should contain task3");
+    }
+
+    @Test
+    void testComplexBranchingDagRendering() {
+        // Arrange
+        DAG dag = createBranchingDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder()
+            .mode(MarkdownDagRenderer.RenderMode.DETAILED)
+            .causalInsights(true)
+            .build();
+        
+        // Mock CADR components - using lenient to avoid unnecessary stubbing warnings
+        CausalGraphConstruction.CausalGraph mockGraph = mock(CausalGraphConstruction.CausalGraph.class);
+        lenient().when(mockGraph.getNodeCount()).thenReturn(4);
+        lenient().when(mockGraph.getEdgeCount()).thenReturn(4);
+        lenient().when(mockGraph.getCoherenceScore()).thenReturn(0.8);
+        lenient().when(causalGraphConstruction.getUserCausalGraphWithUpdates(any())).thenReturn(mockGraph);
+        lenient().when(causalGraphConstruction.getStrongCausalRelationships(any(), anyDouble()))
+            .thenReturn(new ArrayList<>());
+        
+        // Act
+        String markdown = rendererWithCADR.renderDagToMarkdown(dag, "testUser", options);
+        
+        // Assert
+        assertNotNull(markdown);
+        assertTrue(markdown.contains("# 📋 Detailed DAG Execution Plan"));
+        assertTrue(markdown.contains("Node: `root`"));
+        assertTrue(markdown.contains("Node: `branch1`"));
+        assertTrue(markdown.contains("Node: `branch2`"));
+        assertTrue(markdown.contains("Node: `merge`"));
+    }
+
+    @Test
+    void testCADRInsightsIntegration() {
+        // Arrange
+        DAG dag = createSimpleDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder()
+            .causalInsights(true)
+            .build();
+        
+        // Mock causal graph with strong relationships
+        CausalGraphConstruction.CausalGraph mockGraph = mock(CausalGraphConstruction.CausalGraph.class);
+        when(mockGraph.getNodeCount()).thenReturn(3);
+        when(mockGraph.getEdgeCount()).thenReturn(2);
+        when(mockGraph.getCoherenceScore()).thenReturn(0.85);
+        
+        CausalGraphConstruction.CausalEdge edge1 = mock(CausalGraphConstruction.CausalEdge.class);
+        when(edge1.getCauseNodeId()).thenReturn("email");
+        when(edge1.getEffectNodeId()).thenReturn("file");
+        when(edge1.getStrength()).thenReturn(0.95);
+        when(edge1.getConfidence()).thenReturn(0.91);
+        when(edge1.getObservationCount()).thenReturn(5);
+        when(edge1.getRelationshipType()).thenReturn(CausalGraphConstruction.CausalRelationshipType.DIRECT_CAUSAL);
+        
+        when(causalGraphConstruction.getUserCausalGraphWithUpdates(any())).thenReturn(mockGraph);
+        when(causalGraphConstruction.getStrongCausalRelationships(any(), anyDouble()))
+            .thenReturn(List.of(edge1));
+        
+        // Act
+        String markdown = rendererWithCADR.renderDagToMarkdown(dag, "testUser", options);
+        
+        // Assert
+        assertTrue(markdown.contains("🧠 CADR Insights"));
+        assertTrue(markdown.contains("Strong Causal Relationships"));
+        assertTrue(markdown.contains("DIRECT_CAUSAL"));
+        assertTrue(markdown.contains("Coherence Score"));
+    }
+
+    @Test
+    void testRenderWithMetadata() {
+        // Arrange
+        DAG dag = createComplexDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder()
+            .mode(MarkdownDagRenderer.RenderMode.DETAILED)
+            .executionMetadata(true)
+            .build();
+        
+        // Act
+        MarkdownDagRenderer.MarkdownRenderResult result = renderer.renderWithMetadata(dag, "testUser", options);
+        
+        // Assert
+        assertNotNull(result);
+        assertNotNull(result.getMarkdown());
+        assertTrue(result.getMarkdown().contains("# 📋 Detailed DAG Execution Plan"));
+        assertNotNull(result.getMetadata());
+        assertTrue(result.getMetadata().containsKey("nodeCount"));
+        assertEquals(10, result.getMetadata().get("nodeCount"));
+        assertTrue(result.getRenderTime().toMillis() >= 0);
+        assertFalse(result.hasWarnings() && result.getWarnings().get(0).getType() == MarkdownDagRenderer.WarningType.PERFORMANCE_DEGRADATION);
+    }
+
+    @Test
+    void testPerformanceWithLargeDag() {
+        // Arrange
+        DAG largeDag = createLargeDag(101); // 101 nodes to trigger warning (>100)
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act
+        long startTime = System.nanoTime();
+        MarkdownDagRenderer.MarkdownRenderResult result = renderer.renderWithMetadata(largeDag, "testUser", options);
+        long duration = System.nanoTime() - startTime;
+        
+        // Assert
+        assertTrue(duration < 100_000_000, "Large DAG rendering should complete in <100ms");
+        assertNotNull(result.getMarkdown());
+        assertTrue(result.getMarkdown().length() > 1000, "Should generate substantial content for large DAG");
+        // Check for performance warning on large DAGs (100+ nodes should trigger warning)
+        assertTrue(result.hasWarnings(), "Large DAG (100+ nodes) should have warnings");
+        assertTrue(result.getWarnings().stream().anyMatch(w -> 
+            w.getType() == MarkdownDagRenderer.WarningType.PERFORMANCE_DEGRADATION), 
+            "Should have performance degradation warning for large DAG");
+    }
+
+    @Test
+    void testConcurrentRenderingScalability() throws InterruptedException {
+        // Arrange
+        DAG dag = createMediumDag(20);
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        List<CompletableFuture<String>> futures = new ArrayList<>();
+        
+        // Act
+        long startTime = System.nanoTime();
+        for (int i = 0; i < 50; i++) {
+            futures.add(CompletableFuture.supplyAsync(() -> 
+                renderer.renderDagToMarkdown(dag, options), executorService));
+        }
+        
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        long duration = System.nanoTime() - startTime;
+        
+        // Assert
+        assertTrue(duration < 500_000_000, "50 concurrent renderings should complete in <500ms");
+        futures.forEach(future -> {
+            assertTrue(future.isDone());
+            assertDoesNotThrow(() -> {
+                String result = future.get();
+                assertNotNull(result);
+                assertTrue(result.contains("# 📋 Detailed DAG Execution Plan"));
+            });
+        });
+    }
+
+    @Test
+    void testMarkdownSyntaxValidation() {
+        // Arrange
+        DAG dag = createDagWithSpecialCharacters();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act
+        String markdown = renderer.renderDagToMarkdown(dag, options);
+        
+        // Assert
+        assertValidMarkdownSyntax(markdown);
+        // Check that special characters are handled properly
+        assertTrue(markdown.contains("Hello"), "Should contain message content");
+        assertTrue(markdown.contains("Bold"), "Should contain bold text reference");
+    }
+
+    @Test
+    void testTemporalConstraintVisualization() {
+        // Arrange
+        DAG dag = createDagWithTemporalConstraints();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder()
+            .temporalConstraints(true)
+            .build();
+        
+        // Mock temporal constraint parsing
+        TemporalConstraintProcessor.TemporalConstraint mockConstraint = 
+            mock(TemporalConstraintProcessor.TemporalConstraint.class);
+        when(mockConstraint.getType()).thenReturn(TemporalConstraintProcessor.ConstraintType.RECURRING);
+        when(mockConstraint.getOriginalExpression()).thenReturn("every monday at 9am");
+        when(mockConstraint.getTargetTime()).thenReturn(Instant.now());
+        when(mockConstraint.getConfidence()).thenReturn(0.8);
+        
+        TemporalConstraintProcessor.ParseResult mockResult = 
+            mock(TemporalConstraintProcessor.ParseResult.class);
+        when(mockResult.getConstraint()).thenReturn(mockConstraint);
+        
+        when(temporalConstraintProcessor.parseTemporalExpression(anyString(), any(), any()))
+            .thenReturn(mockResult);
+        
+        // Act
+        String markdown = rendererWithCADR.renderDagToMarkdown(dag, options);
+        
+        // Assert
+        assertTrue(markdown.contains("⏰ Temporal Constraints"));
+        assertTrue(markdown.contains("every monday at 9am"));
+    }
+
+    @Test
+    void testErrorHandlingInvalidDag() {
+        // Arrange
+        DAG invalidDag = createInvalidDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act & Assert
+        assertDoesNotThrow(() -> {
+            MarkdownDagRenderer.MarkdownRenderResult result = renderer.renderWithMetadata(invalidDag, "testUser", options);
+            assertNotNull(result);
+            assertNotNull(result.getMarkdown());
+            // Should handle circular dependencies gracefully
+            assertTrue(result.getMarkdown().contains("Node: `task1`"));
+            assertTrue(result.getMarkdown().contains("Node: `task2`"));
+        });
+    }
+
+    @Test
+    void testMarkdownCaching() {
+        // Arrange
+        DAG dag = createSimpleDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act
+        String firstRender = renderer.renderDagToMarkdown(dag, options);
+        String secondRender = renderer.renderDagToMarkdown(dag, options);
+        
+        // Assert
+        assertNotNull(firstRender);
+        assertNotNull(secondRender);
+        // Due to caching, results should be consistent
+        assertTrue(firstRender.length() > 0);
+        assertTrue(secondRender.length() > 0);
+    }
+
+    @Test
+    void testStatisticsCollection() {
+        // Arrange
+        DAG dag = createComplexDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act
+        renderer.renderDagToMarkdown(dag, options);
+        renderer.renderDagToMarkdown(dag, options); // Second render for cache hit
+        Map<String, Object> stats = renderer.getStatistics();
+        
+        // Assert
+        assertNotNull(stats);
+        assertTrue(stats.containsKey("totalRenderRequests"));
+        assertTrue(stats.containsKey("cacheHits"));
+        assertTrue(stats.containsKey("cacheMisses"));
+        assertTrue(stats.containsKey("cacheHitRate"));
+        assertTrue(stats.containsKey("averageRenderTime"));
+        assertTrue((Long) stats.get("totalRenderRequests") >= 2);
+    }
+
+    @Test
+    void testRenderModeVariations() {
+        // Arrange
+        DAG dag = createSimpleDag();
+        
+        // Act & Assert for different render modes
+        for (MarkdownDagRenderer.RenderMode mode : MarkdownDagRenderer.RenderMode.values()) {
+            MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder()
+                .mode(mode)
+                .build();
+            
+            String markdown = renderer.renderDagToMarkdown(dag, options);
+            assertNotNull(markdown, "Should render for mode: " + mode);
+            assertTrue(markdown.length() > 0, "Should generate content for mode: " + mode);
+            
+            // Each mode should have mode-specific characteristics
+            switch (mode) {
+                case DETAILED:
+                    assertTrue(markdown.contains("Detailed DAG"));
+                    break;
+                case SUMMARY:
+                    assertTrue(markdown.contains("DAG Summary"));
+                    break;
+                case EXECUTION_FOCUSED:
+                    assertTrue(markdown.contains("Execution Plan"));
+                    break;
+                case CAUSAL_FOCUSED:
+                    assertTrue(markdown.contains("Causal Execution"));
+                    break;
+                case TEMPORAL_FOCUSED:
+                    assertTrue(markdown.contains("Temporal Execution"));
+                    break;
+            }
+        }
+    }
+
+    @Test
+    void testNodeRenderingContext() {
+        // Arrange
+        TaskNode node = new TaskNode("test-node", "TestPlugin", Map.of("param1", "value1"));
+        List<MarkdownDagRenderer.CausalInsight> insights = List.of(
+            new MarkdownDagRenderer.CausalInsight("node1", "node2", "DIRECT", 0.8, 0.9, "Test insight")
+        );
+        List<MarkdownDagRenderer.TemporalConstraint> constraints = List.of(
+            new MarkdownDagRenderer.TemporalConstraint("ABSOLUTE", "at 9am", Instant.now(), Duration.ofHours(1), 0.7)
+        );
+        
+        MarkdownDagRenderer.NodeRenderContext context = new MarkdownDagRenderer.NodeRenderContext(
+            node, Map.of("causal", "data"), Map.of("temporal", "data"), 
+            insights, constraints, 0.85, 1
+        );
+        
+        // Act
+        String nodeMarkdown = renderer.renderNodeToMarkdown(node, context);
+        
+        // Assert
+        assertNotNull(nodeMarkdown);
+        assertTrue(nodeMarkdown.contains("Node: `test-node`"));
+        assertTrue(nodeMarkdown.contains("TestPlugin"));
+        assertTrue(nodeMarkdown.contains("Execution Order"));
+        assertTrue(nodeMarkdown.contains("Confidence"));
+        assertTrue(nodeMarkdown.contains("🧠 Causal Insights"));
+        assertTrue(nodeMarkdown.contains("⏰ Temporal Constraints"));
+    }
+    
+    @Test
+    void testClearCache() {
+        // Arrange
+        DAG dag = createSimpleDag();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act - Render to populate cache
+        renderer.renderDagToMarkdown(dag, options);
+        Map<String, Object> statsBefore = renderer.getStatistics();
+        
+        // Clear cache
+        renderer.clearCache();
+        Map<String, Object> statsAfter = renderer.getStatistics();
+        
+        // Assert
+        assertEquals(0, ((Number) statsAfter.get("cacheSize")).intValue());
+    }
+
+    // Helper methods for creating test DAGs
+    private DAG createLinearDag(String... taskIds) {
+        DAG dag = new DAG();
+        TaskNode prevNode = null;
+        
+        for (String taskId : taskIds) {
+            TaskNode node = new TaskNode(taskId, "TestPlugin", Map.of("action", taskId));
+            if (prevNode != null) {
+                node.getDependencyIds().add(prevNode.getId());
+            }
+            dag.addNode(node);
+            prevNode = node;
+        }
+        dag.rebuildDependencies();
+        return dag;
+    }
+
+    private DAG createBranchingDag() {
+        DAG dag = new DAG();
+        
+        TaskNode root = new TaskNode("root", "TestPlugin", Map.of());
+        TaskNode branch1 = new TaskNode("branch1", "EmailPlugin", Map.of());
+        TaskNode branch2 = new TaskNode("branch2", "FilePlugin", Map.of());
+        TaskNode merge = new TaskNode("merge", "SlackPlugin", Map.of());
+        
+        // Set up dependencies
+        branch1.getDependencyIds().add("root");
+        branch2.getDependencyIds().add("root");
+        merge.getDependencyIds().add("branch1");
+        merge.getDependencyIds().add("branch2");
+        
+        dag.addNode(root);
+        dag.addNode(branch1);
+        dag.addNode(branch2);
+        dag.addNode(merge);
+        
+        dag.rebuildDependencies();
+        return dag;
+    }
+
+    private DAG createComplexDag() {
+        // Create a complex DAG with multiple levels and branches
+        DAG dag = new DAG();
+        
+        // Add nodes
+        List<TaskNode> nodes = new ArrayList<>();
+        for (int i = 1; i <= 10; i++) {
+            TaskNode node = new TaskNode("task" + i, "Plugin" + i, 
+                Map.of("param" + i, "value" + i));
+            nodes.add(node);
+            dag.addNode(node);
+        }
+        
+        // Add complex dependencies
+        nodes.get(1).getDependencyIds().add("task1"); // task2 depends on task1
+        nodes.get(2).getDependencyIds().add("task1"); // task3 depends on task1
+        nodes.get(3).getDependencyIds().add("task2"); // task4 depends on task2
+        nodes.get(4).getDependencyIds().add("task3"); // task5 depends on task3
+        nodes.get(5).getDependencyIds().add("task4"); // task6 depends on task4
+        nodes.get(5).getDependencyIds().add("task5"); // task6 depends on task5
+        nodes.get(6).getDependencyIds().add("task6"); // task7 depends on task6
+        nodes.get(7).getDependencyIds().add("task7"); // task8 depends on task7
+        nodes.get(8).getDependencyIds().add("task8"); // task9 depends on task8
+        nodes.get(9).getDependencyIds().add("task9"); // task10 depends on task9
+        
+        dag.rebuildDependencies();
+        return dag;
+    }
+
+    private DAG createLargeDag(int nodeCount) {
+        DAG dag = new DAG();
+        
+        // Create nodes
+        List<TaskNode> nodes = new ArrayList<>();
+        for (int i = 1; i <= nodeCount; i++) {
+            TaskNode node = new TaskNode("task" + i, "Plugin" + (i % 5), 
+                Map.of("index", String.valueOf(i)));
+            nodes.add(node);
+            dag.addNode(node);
+        }
+        
+        // Create dependencies (chain with some branching)
+        for (int i = 1; i < nodeCount; i++) {
+            nodes.get(i).getDependencyIds().add("task" + i); // task(i+1) depends on task(i)
+            
+            // Add occasional branches
+            if (i % 10 == 0 && i + 2 <= nodeCount) {
+                nodes.get(i + 1).getDependencyIds().add("task" + i); // task(i+2) depends on task(i)
+            }
+        }
+        
+        dag.rebuildDependencies();
+        return dag;
+    }
+
+    private DAG createMediumDag(int nodeCount) {
+        return createLargeDag(nodeCount);
+    }
+
+    private DAG createSimpleDag() {
+        return createLinearDag("email", "file", "slack");
+    }
+
+    private DAG createDagWithSpecialCharacters() {
+        DAG dag = new DAG();
+        
+        TaskNode node1 = new TaskNode("task#1", "Plugin*", 
+            Map.of("message", "Hello <world> & friends!"));
+        TaskNode node2 = new TaskNode("task_2", "PluginB", 
+            Map.of("content", "**Bold** and *italic* text"));
+        
+        node2.getDependencyIds().add("task#1");
+        
+        dag.addNode(node1);
+        dag.addNode(node2);
+        dag.rebuildDependencies();
+        
+        return dag;
+    }
+
+    private DAG createDagWithTemporalConstraints() {
+        DAG dag = new DAG();
+        
+        TaskNode node = new TaskNode("scheduled_task", "EmailPlugin", Map.of(
+            "schedule", "every monday at 9am",
+            "deadline", "2024-12-31T23:59:59",
+            "recurrence", "weekly"
+        ));
+        
+        dag.addNode(node);
+        return dag;
+    }
+
+    private DAG createInvalidDag() {
+        DAG dag = new DAG();
+        
+        TaskNode node1 = new TaskNode("task1", "NonExistentPlugin", Map.of());
+        TaskNode node2 = new TaskNode("task2", "EmailPlugin", Map.of());
+        
+        // Create circular dependency (invalid)
+        node1.getDependencyIds().add("task2");
+        node2.getDependencyIds().add("task1");
+        
+        dag.addNode(node1);
+        dag.addNode(node2);
+        dag.rebuildDependencies(); // This will handle circular deps gracefully
+        
+        return dag;
+    }
+
+    private String extractMermaidSection(String markdown) {
+        int start = markdown.indexOf("```mermaid");
+        if (start == -1) return null;
+        
+        int end = markdown.indexOf("```", start + 10);
+        if (end == -1) return null;
+        
+        return markdown.substring(start, end + 3);
+    }
+
+    private void assertValidMarkdownSyntax(String markdown) {
+        // Basic markdown syntax validation
+        assertFalse(markdown.contains("###\n#"), "Should not have malformed headers");
+        assertFalse(markdown.contains("**\n**"), "Should not have malformed bold text");
+        assertTrue(markdown.split("\n").length > 5, "Should have multiple lines");
+        
+        // Basic markdown structure validation - asterisks might be used in various contexts
+        // so we'll just check for basic structure rather than strict balance
+        assertTrue(markdown.contains("**"), "Should contain bold formatting");
+    }
+
+    private boolean markdownContainsExpectedContent(String markdown, String... expectedContent) {
+        for (String content : expectedContent) {
+            if (!markdown.contains(content)) {
+                return false;
+            }
+        }
+        return true;
+    }
+    
+    @Test
+    void testRenderCausalInsightsSection() {
+        // Arrange
+        DAG dag = createSimpleDag();
+        CausalGraphConstruction.CausalGraph mockGraph = mock(CausalGraphConstruction.CausalGraph.class);
+        lenient().when(mockGraph.getNodeCount()).thenReturn(3);
+        lenient().when(mockGraph.getEdgeCount()).thenReturn(2);
+        lenient().when(mockGraph.getCoherenceScore()).thenReturn(0.9);
+        
+        lenient().when(causalGraphConstruction.getUserCausalGraphWithUpdates(any())).thenReturn(mockGraph);
+        lenient().when(causalGraphConstruction.getStrongCausalRelationships(any(), anyDouble()))
+            .thenReturn(new ArrayList<>());
+        
+        // Act
+        String causalInsights = rendererWithCADR.renderCausalInsights("testUser", dag);
+        
+        // Assert
+        assertNotNull(causalInsights);
+        assertTrue(causalInsights.contains("🧠 CADR Insights"));
+        assertTrue(causalInsights.contains("No significant causal relationships detected"));
+    }
+    
+    @Test
+    void testRenderTemporalConstraintsSection() {
+        // Arrange
+        DAG dag = createDagWithTemporalConstraints();
+        
+        // Act
+        String temporalConstraints = rendererWithCADR.renderTemporalConstraints(dag);
+        
+        // Assert
+        assertNotNull(temporalConstraints);
+        assertTrue(temporalConstraints.contains("⏰ Temporal Constraints"));
+    }
+    
+    @Test
+    void testNullInputHandling() {
+        // Test null DAG
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        MarkdownDagRenderer.MarkdownRenderResult result = renderer.renderWithMetadata(null, "testUser", options);
+        
+        assertNotNull(result);
+        assertTrue(result.getMarkdown().contains("Rendering Error"));
+        
+        // Test null node in renderNodeToMarkdown
+        String nodeMarkdown = renderer.renderNodeToMarkdown(null, null);
+        assertNotNull(nodeMarkdown);
+        assertTrue(nodeMarkdown.contains("Error"));
+    }
+    
+    @Test 
+    void testEmptyDagHandling() {
+        // Arrange
+        DAG emptyDag = new DAG();
+        MarkdownDagRenderer.RenderOptions options = MarkdownDagRenderer.RenderOptions.builder().build();
+        
+        // Act
+        MarkdownDagRenderer.MarkdownRenderResult result = renderer.renderWithMetadata(emptyDag, "testUser", options);
+        
+        // Assert
+        assertNotNull(result);
+        assertTrue(result.hasWarnings());
+        assertTrue(result.getWarnings().stream().anyMatch(w -> 
+            w.getType() == MarkdownDagRenderer.WarningType.MISSING_CAUSAL_DATA));
+    }
+}

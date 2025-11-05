@@ -1,0 +1,350 @@
+package api;
+
+import api.BasePerformanceTest;
+import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Tag;
+import org.openjdk.jmh.annotations.*;
+import org.openjdk.jmh.runner.RunnerException;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Performance tests for load, stress, and scalability scenarios
+ * DISABLED: Requires full API infrastructure with web server for meaningful load testing.
+ */
+@Tag("slow")
+@Tag("performance")
+@Tag("benchmark")
+@Disabled("Performance tests require full API infrastructure with web server for meaningful results")
+@SpringBootTest(classes = {api.config.IntegrationTestConfiguration.class}, webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@DisplayName("Performance Tests")
+public class PerformanceTest extends BasePerformanceTest {
+
+    @LocalServerPort
+    private int port;
+
+    private String validToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.token";
+
+    @BeforeEach
+    public void setUpPerformance() {
+        RestAssured.port = port;
+        RestAssured.baseURI = "http://localhost";
+    }
+
+    @Test
+    @DisplayName("Should handle high load of prompt executions")
+    void shouldHandleHighLoadOfPromptExecutions() throws InterruptedException {
+        int threadCount = 50;
+        int requestsPerThread = 10;
+        CountDownLatch latch = new CountDownLatch(threadCount);
+        AtomicInteger successCount = new AtomicInteger(0);
+        AtomicInteger errorCount = new AtomicInteger(0);
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+        long startTime = System.currentTimeMillis();
+
+        for (int i = 0; i < threadCount; i++) {
+            executor.submit(() -> {
+                try {
+                    for (int j = 0; j < requestsPerThread; j++) {
+                        String requestBody = """
+                            {
+                                "prompt": "Send email to test@example.com saying Load Test %d",
+                                "dryRun": true
+                            }
+                            """.formatted(j);
+
+                        try {
+                            given()
+                                .header("Authorization", "Bearer " + validToken)
+                                .contentType(ContentType.JSON)
+                                .body(requestBody)
+                            .when()
+                                .post("/api/v1/prompts/execute")
+                            .then()
+                                .statusCode(200);
+                            
+                            successCount.incrementAndGet();
+                        } catch (Exception e) {
+                            errorCount.incrementAndGet();
+                        }
+                    }
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        boolean completed = latch.await(10, TimeUnit.SECONDS); // Reduced from 60s
+        executor.shutdown();
+        
+        long endTime = System.currentTimeMillis();
+        long duration = endTime - startTime;
+        
+        assertThat(completed).isTrue();
+        assertThat(successCount.get()).isGreaterThan((int)(threadCount * requestsPerThread * 0.8)); // 80% success rate
+        
+        System.out.printf("Load Test Results: %d successful, %d errors, %d ms duration%n", 
+            successCount.get(), errorCount.get(), duration);
+    }
+
+    @Test
+    @DisplayName("Should handle concurrent DAG executions")
+    void shouldHandleConcurrentDagExecutions() throws InterruptedException {
+        int concurrentExecutions = 20;
+        CountDownLatch latch = new CountDownLatch(concurrentExecutions);
+        AtomicInteger successCount = new AtomicInteger(0);
+        ExecutorService executor = Executors.newFixedThreadPool(concurrentExecutions);
+
+        for (int i = 0; i < concurrentExecutions; i++) {
+            final int executionId = i;
+            executor.submit(() -> {
+                try {
+                    String requestBody = """
+                        {
+                            "dag": {
+                                "nodes": [
+                                    {
+                                        "id": "task_%d",
+                                        "action": "EmailPlugin",
+                                        "inputParams": {
+                                            "recipient": "test@example.com",
+                                            "subject": "Concurrent Test %d"
+                                        }
+                                    }
+                                ]
+                            },
+                            "options": {
+                                "dryRun": true
+                            }
+                        }
+                        """.formatted(executionId, executionId);
+
+                    given()
+                        .header("Authorization", "Bearer " + validToken)
+                        .contentType(ContentType.JSON)
+                        .body(requestBody)
+                    .when()
+                        .post("/api/v1/dags/execute")
+                    .then()
+                        .statusCode(200);
+                    
+                    successCount.incrementAndGet();
+                } catch (Exception e) {
+                    System.err.println("Concurrent execution failed: " + e.getMessage());
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+
+        boolean completed = latch.await(5, TimeUnit.SECONDS); // Reduced from 30s
+        executor.shutdown();
+        
+        assertThat(completed).isTrue();
+        assertThat(successCount.get()).isEqualTo(concurrentExecutions);
+    }
+
+    @Test
+    @DisplayName("Should measure memory usage under load")
+    void shouldMeasureMemoryUsageUnderLoad() throws InterruptedException {
+        Runtime runtime = Runtime.getRuntime();
+        long initialMemory = runtime.totalMemory() - runtime.freeMemory();
+        
+        // Execute memory-intensive operations
+        int iterations = 100;
+        for (int i = 0; i < iterations; i++) {
+            String requestBody = """
+                {
+                    "prompt": "Create file large_file_%d.txt with content 'Large content for memory test'",
+                    "dryRun": true
+                }
+                """.formatted(i);
+
+            given()
+                .header("Authorization", "Bearer " + validToken)
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(200);
+        }
+
+        // Force garbage collection
+        System.gc();
+        Thread.sleep(100); // Reduced from 1000ms for faster tests
+        
+        long finalMemory = runtime.totalMemory() - runtime.freeMemory();
+        long memoryIncrease = finalMemory - initialMemory;
+        
+        System.out.printf("Memory usage: Initial=%d bytes, Final=%d bytes, Increase=%d bytes%n",
+            initialMemory, finalMemory, memoryIncrease);
+        
+        // Memory increase should be reasonable (less than 100MB for this test)
+        assertThat(memoryIncrease).isLessThan(100 * 1024 * 1024);
+    }
+
+    @Test
+    @DisplayName("Should measure response time percentiles")
+    void shouldMeasureResponseTimePercentiles() {
+        int requestCount = 100;
+        long[] responseTimes = new long[requestCount];
+        
+        for (int i = 0; i < requestCount; i++) {
+            long startTime = System.nanoTime();
+            
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/plugins")
+            .then()
+                .statusCode(200);
+            
+            long endTime = System.nanoTime();
+            responseTimes[i] = endTime - startTime;
+        }
+        
+        // Sort response times for percentile calculation
+        java.util.Arrays.sort(responseTimes);
+        
+        long p50 = responseTimes[requestCount / 2];
+        long p95 = responseTimes[(int) (requestCount * 0.95)];
+        long p99 = responseTimes[(int) (requestCount * 0.99)];
+        
+        System.out.printf("Response time percentiles: P50=%d ns, P95=%d ns, P99=%d ns%n",
+            p50, p95, p99);
+        
+        // Response times should be reasonable (less than 1 second for P99)
+        assertThat(p99).isLessThan(1_000_000_000L); // 1 second in nanoseconds
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.Throughput)
+    @OutputTimeUnit(TimeUnit.SECONDS)
+    public void benchmarkPromptExecution() {
+        String requestBody = """
+            {
+                "prompt": "Send email to benchmark@example.com",
+                "dryRun": true
+            }
+            """;
+
+        given()
+            .header("Authorization", "Bearer " + validToken)
+            .contentType(ContentType.JSON)
+            .body(requestBody)
+        .when()
+            .post("/api/v1/prompts/execute")
+        .then()
+            .statusCode(200);
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.MILLISECONDS)
+    public void benchmarkPluginDiscovery() {
+        given()
+            .header("Authorization", "Bearer " + validToken)
+        .when()
+            .get("/api/v1/plugins")
+        .then()
+            .statusCode(200);
+    }
+
+    @Benchmark
+    @BenchmarkMode(Mode.AverageTime)
+    @OutputTimeUnit(TimeUnit.MILLISECONDS)
+    public void benchmarkMemoryRetrieval() {
+        given()
+            .header("Authorization", "Bearer " + validToken)
+            .queryParam("limit", "10")
+        .when()
+            .get("/api/v1/memory")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    @DisplayName("Should run JMH benchmarks")
+    void shouldRunJmhBenchmarks() throws RunnerException {
+        runBenchmarks(PerformanceTest.class);
+    }
+
+    @Test
+    @DisplayName("Should handle stress test with resource exhaustion")
+    void shouldHandleStressTestWithResourceExhaustion() throws InterruptedException {
+        // Gradually increase load until system shows signs of stress
+        int maxThreads = 200;
+        int requestsPerThread = 5;
+        
+        for (int threadCount = 10; threadCount <= maxThreads; threadCount += 10) {
+            CountDownLatch latch = new CountDownLatch(threadCount);
+            AtomicInteger successCount = new AtomicInteger(0);
+            AtomicInteger errorCount = new AtomicInteger(0);
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+            
+            long startTime = System.currentTimeMillis();
+            
+            for (int i = 0; i < threadCount; i++) {
+                executor.submit(() -> {
+                    try {
+                        for (int j = 0; j < requestsPerThread; j++) {
+                            try {
+                                given()
+                                    .header("Authorization", "Bearer " + validToken)
+                                    .contentType(ContentType.JSON)
+                                    .body("{\"prompt\":\"Stress test\",\"dryRun\":true}")
+                                .when()
+                                    .post("/api/v1/prompts/execute")
+                                .then()
+                                    .statusCode(200);
+                                
+                                successCount.incrementAndGet();
+                            } catch (Exception e) {
+                                errorCount.incrementAndGet();
+                            }
+                        }
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+            
+            boolean completed = latch.await(10, TimeUnit.SECONDS); // Reduced from 60s
+            executor.shutdown();
+            
+            long endTime = System.currentTimeMillis();
+            long duration = endTime - startTime;
+            double successRate = (double) successCount.get() / (threadCount * requestsPerThread);
+            
+            System.out.printf("Stress Test - Threads: %d, Success Rate: %.2f%%, Duration: %d ms%n",
+                threadCount, successRate * 100, duration);
+            
+            // If success rate drops below 50%, we've found the breaking point
+            if (successRate < 0.5) {
+                System.out.printf("System breaking point reached at %d threads%n", threadCount);
+                break;
+            }
+        }
+    }
+}

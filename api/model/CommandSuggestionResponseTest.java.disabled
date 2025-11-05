@@ -1,0 +1,325 @@
+package tests.api.model;
+
+import api.model.CommandSuggestionResponse;
+import core.CommandSuggestion;
+import core.InterfaceType;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.*;
+
+/**
+ * Unit tests for CommandSuggestionResponse DTO.
+ * 
+ * Tests response construction, suggestion handling, error states, and utility methods
+ * for the command suggestion response model used in the API layer.
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.1d
+ */
+@DisplayName("CommandSuggestionResponse Tests")
+class CommandSuggestionResponseTest {
+
+    @Test
+    @DisplayName("Should create successful response with suggestions")
+    void shouldCreateSuccessfulResponseWithSuggestions() {
+        // Arrange
+        List<CommandSuggestionResponse.CommandSuggestionDto> suggestions = Arrays.asList(
+            createSuggestionDto("git commit", 0.9, InterfaceType.CLI),
+            createSuggestionDto("git checkout", 0.8, InterfaceType.CLI)
+        );
+        
+        // Act
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            suggestions, "req123", "user123", InterfaceType.CLI, "git", 150L
+        );
+        
+        // Assert
+        assertThat(response.getSuggestions()).isEqualTo(suggestions);
+        assertThat(response.getRequestId()).isEqualTo("req123");
+        assertThat(response.getUserId()).isEqualTo("user123");
+        assertThat(response.getInterfaceType()).isEqualTo(InterfaceType.CLI);
+        assertThat(response.getPartialInput()).isEqualTo("git");
+        assertThat(response.getTotalSuggestions()).isEqualTo(2);
+        assertThat(response.getProcessingTimeMs()).isEqualTo(150L);
+        assertThat(response.getTimestamp()).isNotNull();
+        assertThat(response.isSuccessful()).isTrue();
+        assertThat(response.hasError()).isFalse();
+        assertThat(response.hasSuggestions()).isTrue();
+    }
+    
+    @Test
+    @DisplayName("Should create error response")
+    void shouldCreateErrorResponse() {
+        // Act
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            "req123", "user123", "Rate limit exceeded"
+        );
+        
+        // Assert
+        assertThat(response.getRequestId()).isEqualTo("req123");
+        assertThat(response.getUserId()).isEqualTo("user123");
+        assertThat(response.getError()).isEqualTo("Rate limit exceeded");
+        assertThat(response.getTotalSuggestions()).isEqualTo(0);
+        assertThat(response.hasError()).isTrue();
+        assertThat(response.isSuccessful()).isFalse();
+        assertThat(response.hasSuggestions()).isFalse();
+    }
+    
+    @Test
+    @DisplayName("Should handle empty suggestions list")
+    void shouldHandleEmptySuggestionsList() {
+        // Act
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            Collections.emptyList(), "req123", "user123", InterfaceType.CLI, "unknown", 50L
+        );
+        
+        // Assert
+        assertThat(response.getTotalSuggestions()).isEqualTo(0);
+        assertThat(response.isSuccessful()).isTrue();
+        assertThat(response.hasError()).isFalse();
+        assertThat(response.hasSuggestions()).isFalse();
+        assertThat(response.getSuggestions()).isEmpty();
+    }
+    
+    @Test
+    @DisplayName("Should find highest confidence suggestion")
+    void shouldFindHighestConfidenceSuggestion() {
+        // Arrange
+        List<CommandSuggestionResponse.CommandSuggestionDto> suggestions = Arrays.asList(
+            createSuggestionDto("git commit", 0.7, InterfaceType.CLI),
+            createSuggestionDto("git checkout", 0.9, InterfaceType.CLI),
+            createSuggestionDto("git push", 0.6, InterfaceType.CLI)
+        );
+        
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            suggestions, "req123", "user123", InterfaceType.CLI, "git", 100L
+        );
+        
+        // Act
+        CommandSuggestionResponse.CommandSuggestionDto highest = response.getHighestConfidenceSuggestion();
+        
+        // Assert
+        assertThat(highest).isNotNull();
+        assertThat(highest.getCommand()).isEqualTo("git checkout");
+        assertThat(highest.getConfidence()).isEqualTo(0.9);
+    }
+    
+    @Test
+    @DisplayName("Should return null for highest confidence when no suggestions")
+    void shouldReturnNullForHighestConfidenceWhenNoSuggestions() {
+        // Arrange
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            Collections.emptyList(), "req123", "user123", InterfaceType.CLI, "git", 100L
+        );
+        
+        // Act
+        CommandSuggestionResponse.CommandSuggestionDto highest = response.getHighestConfidenceSuggestion();
+        
+        // Assert
+        assertThat(highest).isNull();
+    }
+    
+    @Test
+    @DisplayName("Should filter high confidence suggestions")
+    void shouldFilterHighConfidenceSuggestions() {
+        // Arrange
+        List<CommandSuggestionResponse.CommandSuggestionDto> suggestions = Arrays.asList(
+            createSuggestionDto("git commit", 0.9, InterfaceType.CLI),
+            createSuggestionDto("git checkout", 0.6, InterfaceType.CLI),
+            createSuggestionDto("git push", 0.8, InterfaceType.CLI),
+            createSuggestionDto("git status", 0.5, InterfaceType.CLI)
+        );
+        
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            suggestions, "req123", "user123", InterfaceType.CLI, "git", 100L
+        );
+        
+        // Act
+        List<CommandSuggestionResponse.CommandSuggestionDto> highConfidence = 
+            response.getHighConfidenceSuggestions(0.7);
+        
+        // Assert
+        assertThat(highConfidence).hasSize(2);
+        assertThat(highConfidence).extracting(CommandSuggestionResponse.CommandSuggestionDto::getCommand)
+                .containsExactlyInAnyOrder("git commit", "git push");
+    }
+    
+    @Test
+    @DisplayName("Should update suggestions and recalculate total")
+    void shouldUpdateSuggestionsAndRecalculateTotal() {
+        // Arrange
+        CommandSuggestionResponse response = new CommandSuggestionResponse();
+        List<CommandSuggestionResponse.CommandSuggestionDto> newSuggestions = Arrays.asList(
+            createSuggestionDto("npm install", 0.8, InterfaceType.CLI),
+            createSuggestionDto("npm start", 0.7, InterfaceType.CLI)
+        );
+        
+        // Act
+        response.setSuggestions(newSuggestions);
+        
+        // Assert
+        assertThat(response.getSuggestions()).isEqualTo(newSuggestions);
+        assertThat(response.getTotalSuggestions()).isEqualTo(2);
+    }
+    
+    @Test
+    @DisplayName("Should handle null suggestions gracefully")
+    void shouldHandleNullSuggestionsGracefully() {
+        // Arrange
+        CommandSuggestionResponse response = new CommandSuggestionResponse();
+        
+        // Act
+        response.setSuggestions(null);
+        
+        // Assert
+        assertThat(response.getSuggestions()).isNull();
+        assertThat(response.getTotalSuggestions()).isEqualTo(0);
+        assertThat(response.hasSuggestions()).isFalse();
+        assertThat(response.getHighestConfidenceSuggestion()).isNull();
+        assertThat(response.getHighConfidenceSuggestions(0.5)).isEmpty();
+    }
+    
+    @Test
+    @DisplayName("Should provide meaningful string representation")
+    void shouldProvideMeaningfulStringRepresentation() {
+        // Arrange
+        List<CommandSuggestionResponse.CommandSuggestionDto> suggestions = Arrays.asList(
+            createSuggestionDto("git commit", 0.9, InterfaceType.CLI)
+        );
+        
+        CommandSuggestionResponse response = new CommandSuggestionResponse(
+            suggestions, "req123", "user123", InterfaceType.CLI, "git", 150L
+        );
+        response.setLearningEnabled(true);
+        
+        // Act
+        String toString = response.toString();
+        
+        // Assert
+        assertThat(toString).contains("req123");
+        assertThat(toString).contains("user123");
+        assertThat(toString).contains("CLI");
+        assertThat(toString).contains("1"); // totalSuggestions
+        assertThat(toString).contains("150"); // processingTimeMs
+        assertThat(toString).contains("true"); // learningEnabled
+        assertThat(toString).contains("false"); // hasError
+    }
+    
+    @Test
+    @DisplayName("Should test CommandSuggestionDto creation from CommandSuggestion")
+    void shouldTestCommandSuggestionDtoCreationFromCommandSuggestion() {
+        // Arrange
+        Map<String, Object> metadata = Map.of("frequency", 5, "lastUsed", "2023-01-01");
+        CommandSuggestion suggestion = new CommandSuggestion(
+            "git checkout main", 0.85, InterfaceType.CLI, "Frequently used command", metadata
+        );
+        
+        // Act
+        CommandSuggestionResponse.CommandSuggestionDto dto = 
+            new CommandSuggestionResponse.CommandSuggestionDto(suggestion, "git che");
+        
+        // Assert
+        assertThat(dto.getCommand()).isEqualTo("git checkout main");
+        assertThat(dto.getConfidence()).isEqualTo(0.85);
+        assertThat(dto.getSourceInterface()).isEqualTo(InterfaceType.CLI);
+        assertThat(dto.getReason()).isEqualTo("Frequently used command");
+        assertThat(dto.getMetadata()).isEqualTo(metadata);
+        assertThat(dto.getConfidenceLevel()).isEqualTo("High confidence");
+        assertThat(dto.getCompletion()).isEqualTo("ckout main");
+    }
+    
+    @Test
+    @DisplayName("Should test CommandSuggestionDto with full constructor")
+    void shouldTestCommandSuggestionDtoWithFullConstructor() {
+        // Arrange
+        Map<String, Object> metadata = Map.of("score", 0.95);
+        
+        // Act
+        CommandSuggestionResponse.CommandSuggestionDto dto = 
+            new CommandSuggestionResponse.CommandSuggestionDto(
+                "npm test", 0.75, InterfaceType.WEB_UI, "Test runner command", 
+                metadata, "Medium confidence", " test"
+            );
+        
+        // Assert
+        assertThat(dto.getCommand()).isEqualTo("npm test");
+        assertThat(dto.getConfidence()).isEqualTo(0.75);
+        assertThat(dto.getSourceInterface()).isEqualTo(InterfaceType.WEB_UI);
+        assertThat(dto.getReason()).isEqualTo("Test runner command");
+        assertThat(dto.getMetadata()).isEqualTo(metadata);
+        assertThat(dto.getConfidenceLevel()).isEqualTo("Medium confidence");
+        assertThat(dto.getCompletion()).isEqualTo(" test");
+    }
+    
+    @Test
+    @DisplayName("Should test CommandSuggestionDto string representation")
+    void shouldTestCommandSuggestionDtoStringRepresentation() {
+        // Arrange
+        CommandSuggestionResponse.CommandSuggestionDto dto = 
+            new CommandSuggestionResponse.CommandSuggestionDto(
+                "docker run", 0.65, InterfaceType.CLI, "Container command", 
+                Map.of(), "Medium confidence", " run"
+            );
+        
+        // Act
+        String toString = dto.toString();
+        
+        // Assert
+        assertThat(toString).contains("docker run");
+        assertThat(toString).contains("0.65");
+        assertThat(toString).contains("CLI");
+        assertThat(toString).contains("Medium confidence");
+        assertThat(toString).contains(" run");
+    }
+    
+    @Test
+    @DisplayName("Should handle all response properties correctly")
+    void shouldHandleAllResponsePropertiesCorrectly() {
+        // Arrange
+        CommandSuggestionResponse response = new CommandSuggestionResponse();
+        Instant now = Instant.now();
+        Map<String, Object> analytics = Map.of("totalPatterns", 25);
+        Map<String, Object> config = Map.of("threshold", 0.5);
+        
+        // Act
+        response.setRequestId("req456");
+        response.setUserId("user456");
+        response.setInterfaceType(InterfaceType.WEB_UI);
+        response.setPartialInput("npm");
+        response.setProcessingTimeMs(200L);
+        response.setTimestamp(now);
+        response.setLearningEnabled(true);
+        response.setCrossInterfaceUsed(false);
+        response.setAnalyticsData(analytics);
+        response.setConfiguration(config);
+        response.setWarning("Cache miss");
+        
+        // Assert
+        assertThat(response.getRequestId()).isEqualTo("req456");
+        assertThat(response.getUserId()).isEqualTo("user456");
+        assertThat(response.getInterfaceType()).isEqualTo(InterfaceType.WEB_UI);
+        assertThat(response.getPartialInput()).isEqualTo("npm");
+        assertThat(response.getProcessingTimeMs()).isEqualTo(200L);
+        assertThat(response.getTimestamp()).isEqualTo(now);
+        assertThat(response.isLearningEnabled()).isTrue();
+        assertThat(response.isCrossInterfaceUsed()).isFalse();
+        assertThat(response.getAnalyticsData()).isEqualTo(analytics);
+        assertThat(response.getConfiguration()).isEqualTo(config);
+        assertThat(response.getWarning()).isEqualTo("Cache miss");
+    }
+    
+    private CommandSuggestionResponse.CommandSuggestionDto createSuggestionDto(
+            String command, double confidence, InterfaceType interfaceType) {
+        return new CommandSuggestionResponse.CommandSuggestionDto(
+            command, confidence, interfaceType, "Test suggestion", 
+            Map.of(), "Test confidence", ""
+        );
+    }
+}

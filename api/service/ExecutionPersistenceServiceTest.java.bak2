@@ -1,0 +1,376 @@
+package tests.api.service;
+
+import api.model.DagExecutionRequest;
+import api.model.DagExecutionResponse;
+import api.model.PromptExecutionRequest;
+import api.model.PromptExecutionResponse;
+import api.service.ExecutionPersistenceService;
+import core.DAG;
+import core.TaskNode;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.Tag;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.lenient;
+
+@ExtendWith(MockitoExtension.class)
+class ExecutionPersistenceServiceTest {
+    
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+    
+    private ExecutionPersistenceService persistenceService;
+    
+    @BeforeEach
+    void setUp() {
+        persistenceService = new ExecutionPersistenceService(jdbcTemplate);
+    }
+    
+    @Test
+    void testInitializeDatabase() {
+        // Act
+        persistenceService.initializeDatabase();
+        
+        // Assert - 4 table creations + 13 index creations = 17 total
+        verify(jdbcTemplate, times(17)).execute(anyString());
+    }
+    
+    @Test
+    void testPersistDagExecution_Success() {
+        // Arrange
+        String executionId = "test-dag-exec-123";
+        DagExecutionRequest request = createTestDagRequest();
+        DagExecutionResponse response = DagExecutionResponse.success(executionId, 
+            "Execution completed successfully", Map.of("result", "success"));
+        
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+        
+        // Act
+        persistenceService.persistDagExecution(executionId, request, response);
+        
+        // Assert
+        verify(jdbcTemplate).update(contains("INSERT INTO execution_results"), any(Object[].class));
+    }
+    
+    @Test
+    void testPersistPromptExecution_Success() {
+        // Arrange
+        String executionId = "test-prompt-exec-123";
+        PromptExecutionRequest request = createTestPromptRequest();
+        PromptExecutionResponse response = PromptExecutionResponse.success(executionId, 
+            "Prompt executed successfully", Map.of("result", "success"));
+        
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+        
+        // Act
+        persistenceService.persistPromptExecution(executionId, request, response);
+        
+        // Assert
+        verify(jdbcTemplate).update(contains("INSERT INTO execution_results"), any(Object[].class));
+    }
+    
+    @Test
+    void testPersistFailedExecution() {
+        // Arrange
+        String executionId = "test-failed-exec-123";
+        DagExecutionRequest request = createTestDagRequest();
+        Exception error = new RuntimeException("Test error");
+        
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+        
+        // Act
+        persistenceService.persistFailedExecution(executionId, request, error);
+        
+        // Assert
+        verify(jdbcTemplate).update(contains("INSERT INTO execution_results"), any(Object[].class));
+    }
+    
+    @Test
+    void testUpdateAnalytics() {
+        // Arrange
+        Map<String, Object> metrics = new HashMap<>();
+        metrics.put("queueSize", 5);
+        metrics.put("activeWorkers", 3);
+        metrics.put("totalExecutions", 100L);
+        metrics.put("completedExecutions", 95L);
+        metrics.put("failedExecutions", 5L);
+        metrics.put("cancelledExecutions", 0L);
+        metrics.put("successRate", 95.0);
+        
+        when(jdbcTemplate.update(anyString(), any(Object[].class))).thenReturn(1);
+        
+        // Act
+        persistenceService.updateAnalytics(metrics);
+        
+        // Assert
+        verify(jdbcTemplate).update(contains("INSERT INTO queue_metrics"), any(Object[].class));
+        verify(jdbcTemplate, atLeastOnce()).update(contains("INSERT INTO execution_analytics"), any(Object[].class));
+    }
+    
+    @Test
+    void testGetExecutionAnalytics() {
+        // Arrange
+        Map<String, Object> filters = new HashMap<>();
+        filters.put("executionType", "DAG");
+        filters.put("startDate", LocalDateTime.now().minusDays(1));
+        filters.put("endDate", LocalDateTime.now());
+        
+        // Mock summary query result
+        Map<String, Object> summaryResult = new HashMap<>();
+        summaryResult.put("total_executions", 100L);
+        summaryResult.put("successful_executions", 95L);
+        summaryResult.put("failed_executions", 5L);
+        summaryResult.put("avg_duration_ms", 1500.0);
+        
+        when(jdbcTemplate.queryForMap(contains("COUNT(*) as total_executions"), any(Object[].class)))
+            .thenReturn(summaryResult);
+        
+        // Mock trends query result
+        when(jdbcTemplate.queryForList(contains("GROUP BY DATE_FORMAT"), any(Object[].class)))
+            .thenReturn(List.of(
+                Map.of("hour", "2024-01-15 10:00:00", "executions", 10, "successful", 9, "avg_duration", 1200.0),
+                Map.of("hour", "2024-01-15 11:00:00", "executions", 15, "successful", 14, "avg_duration", 1300.0)
+            ));
+        
+        // Mock errors query result
+        when(jdbcTemplate.queryForList(contains("error_type"), any(Object[].class)))
+            .thenReturn(List.of(
+                Map.of("error_type", "TIMEOUT", "count", 3, "percentage", 60.0),
+                Map.of("error_type", "PLUGIN_ERROR", "count", 2, "percentage", 40.0)
+            ));
+        
+        // Mock performance query result
+        when(jdbcTemplate.queryForList(contains("GROUP BY execution_type"), any(Object[].class)))
+            .thenReturn(List.of(
+                Map.of("execution_type", "DAG", "count", 80, "avg_duration", 1600.0, "min_duration", 500, "max_duration", 5000),
+                Map.of("execution_type", "PROMPT", "count", 20, "avg_duration", 800.0, "min_duration", 200, "max_duration", 2000)
+            ));
+        
+        // Act
+        Map<String, Object> analytics = persistenceService.getExecutionAnalytics(filters);
+        
+        // Assert
+        assertNotNull(analytics);
+        assertTrue(analytics.containsKey("summary"));
+        assertTrue(analytics.containsKey("trends"));
+        assertTrue(analytics.containsKey("errors"));
+        assertTrue(analytics.containsKey("performance"));
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> summary = (Map<String, Object>) analytics.get("summary");
+        assertEquals(100L, summary.get("total_executions"));
+        assertEquals(95L, summary.get("successful_executions"));
+        
+        verify(jdbcTemplate, times(3)).queryForList(anyString(), any(Object[].class));
+        verify(jdbcTemplate).queryForMap(anyString(), any(Object[].class));
+    }
+    
+    @Test
+    void testGetExecutionHistory() {
+        // Arrange
+        int offset = 0;
+        int limit = 10;
+        Map<String, Object> filters = new HashMap<>();
+        filters.put("executionType", "DAG");
+        filters.put("status", "COMPLETED");
+        filters.put("success", true);
+        
+        // Mock count query
+        when(jdbcTemplate.queryForObject(contains("SELECT COUNT(*)"), eq(Integer.class), any(Object[].class)))
+            .thenReturn(25);
+        
+        // Mock data query
+        when(jdbcTemplate.queryForList(contains("ORDER BY start_time DESC"), any(Object[].class)))
+            .thenReturn(List.of(
+                Map.of("execution_id", "exec1", "execution_type", "DAG", "status", "COMPLETED", "success", true),
+                Map.of("execution_id", "exec2", "execution_type", "DAG", "status", "COMPLETED", "success", true)
+            ));
+        
+        // Act
+        Map<String, Object> result = persistenceService.getExecutionHistory(offset, limit, filters);
+        
+        // Assert
+        assertNotNull(result);
+        assertTrue(result.containsKey("executions"));
+        assertTrue(result.containsKey("pagination"));
+        
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> executions = (List<Map<String, Object>>) result.get("executions");
+        assertEquals(2, executions.size());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pagination = (Map<String, Object>) result.get("pagination");
+        assertEquals(25, pagination.get("total"));
+        assertEquals(0, pagination.get("offset"));
+        assertEquals(10, pagination.get("limit"));
+        assertTrue((Boolean) pagination.get("hasMore"));
+        
+        verify(jdbcTemplate).queryForObject(anyString(), eq(Integer.class), any(Object[].class));
+        verify(jdbcTemplate).queryForList(anyString(), any(Object[].class));
+    }
+    
+    @Test
+    void testGetQueueMetricsHistory() {
+        // Arrange
+        int hours = 24;
+        
+        when(jdbcTemplate.queryForList(contains("FROM queue_metrics"), any(Object.class)))
+            .thenReturn(List.of(
+                Map.of("timestamp", "2024-01-15 10:00:00", "queue_size", 5, "active_workers", 3, "success_rate", 95.0),
+                Map.of("timestamp", "2024-01-15 11:00:00", "queue_size", 8, "active_workers", 4, "success_rate", 92.0)
+            ));
+        
+        // Act
+        List<Map<String, Object>> result = persistenceService.getQueueMetricsHistory(hours);
+        
+        // Assert
+        assertNotNull(result);
+        assertEquals(2, result.size());
+        
+        Map<String, Object> firstMetric = result.get(0);
+        assertEquals(5, firstMetric.get("queue_size"));
+        assertEquals(3, firstMetric.get("active_workers"));
+        assertEquals(95.0, firstMetric.get("success_rate"));
+        
+        verify(jdbcTemplate).queryForList(anyString(), any(Object.class));
+    }
+    
+    @Test
+    void testCleanupOldData() {
+        // Arrange
+        int daysToKeep = 30;
+        
+        when(jdbcTemplate.update(contains("DELETE FROM execution_results"), any(Object.class)))
+            .thenReturn(10);
+        when(jdbcTemplate.update(contains("DELETE FROM execution_analytics"), any(Object.class)))
+            .thenReturn(50);
+        when(jdbcTemplate.update(contains("DELETE FROM queue_metrics"), any(Object.class)))
+            .thenReturn(100);
+        
+        // Act
+        persistenceService.cleanupOldData(daysToKeep);
+        
+        // Assert
+        verify(jdbcTemplate, times(3)).update(contains("DELETE FROM"), any(Object.class));
+    }
+    
+    @Test
+    void testGetDatabaseHealth_Healthy() {
+        // Arrange
+        when(jdbcTemplate.queryForObject("SELECT 1", Integer.class)).thenReturn(1);
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM execution_results"), eq(Long.class)))
+            .thenReturn(100L);
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM node_execution_details"), eq(Long.class)))
+            .thenReturn(500L);
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM execution_analytics"), eq(Long.class)))
+            .thenReturn(1000L);
+        when(jdbcTemplate.queryForObject(contains("COUNT(*) FROM queue_metrics"), eq(Long.class)))
+            .thenReturn(200L);
+        
+        // Act
+        Map<String, Object> health = persistenceService.getDatabaseHealth();
+        
+        // Assert
+        assertNotNull(health);
+        assertEquals("healthy", health.get("status"));
+        assertEquals("healthy", health.get("connectivity"));
+        assertEquals(100L, health.get("executionResults"));
+        assertEquals(500L, health.get("nodeExecutionDetails"));
+        assertEquals(1000L, health.get("executionAnalytics"));
+        assertEquals(200L, health.get("queueMetrics"));
+        
+        verify(jdbcTemplate, times(4)).queryForObject(anyString(), eq(Long.class));
+        verify(jdbcTemplate).queryForObject("SELECT 1", Integer.class);
+    }
+    
+    @Test
+    void testGetDatabaseHealth_Unhealthy() {
+        // Arrange
+        when(jdbcTemplate.queryForObject("SELECT 1", Integer.class))
+            .thenThrow(new RuntimeException("Database connection failed"));
+        
+        // Act
+        Map<String, Object> health = persistenceService.getDatabaseHealth();
+        
+        // Assert
+        assertNotNull(health);
+        assertEquals("unhealthy", health.get("status"));
+        assertTrue(health.containsKey("error"));
+        assertTrue(health.get("error").toString().contains("Database connection failed"));
+    }
+    
+    @Test
+    void testPersistDagExecution_WithException() {
+        // Arrange
+        String executionId = "test-dag-exec-123";
+        DagExecutionRequest request = createTestDagRequest();
+        DagExecutionResponse response = DagExecutionResponse.success(executionId, 
+            "Execution completed successfully", Map.of("result", "success"));
+        
+        when(jdbcTemplate.update(anyString(), any(Object[].class)))
+            .thenThrow(new RuntimeException("Database error"));
+        
+        // Act & Assert - Should not throw exception
+        assertDoesNotThrow(() -> {
+            persistenceService.persistDagExecution(executionId, request, response);
+        });
+        
+        verify(jdbcTemplate).update(anyString(), any(Object[].class));
+    }
+    
+    @Test
+    void testUpdateAnalytics_WithException() {
+        // Arrange
+        Map<String, Object> metrics = new HashMap<>();
+        metrics.put("queueSize", 5);
+        metrics.put("totalExecutions", 100L);
+        
+        lenient().when(jdbcTemplate.update(anyString(), any(Object[].class)))
+            .thenThrow(new RuntimeException("Database error"));
+        
+        // Act & Assert - Should not throw exception
+        assertDoesNotThrow(() -> {
+            persistenceService.updateAnalytics(metrics);
+        });
+        
+        // Note: When exception is thrown, the method may exit early without calling update
+        // So we don't verify the interaction in this exception test
+    }
+    
+    private DagExecutionRequest createTestDagRequest() {
+        DagExecutionRequest request = new DagExecutionRequest();
+        
+        // Create a simple DAG
+        DAG dag = new DAG();
+        TaskNode node = new TaskNode("test-node", "TestPlugin");
+        node.setInputParams(Map.of("param1", "value1"));
+        dag.addNode(node);
+        dag.setRootNode(node);
+        
+        request.setDag(dag);
+        request.setContext(Map.of("userId", "test-user"));
+        request.setTrace(true);
+        
+        return request;
+    }
+    
+    private PromptExecutionRequest createTestPromptRequest() {
+        PromptExecutionRequest request = new PromptExecutionRequest();
+        request.setPrompt("Test prompt");
+        // Note: PromptExecutionRequest doesn't have setTrace or MemoryContext
+        
+        return request;
+    }
+}

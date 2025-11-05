@@ -1,0 +1,244 @@
+package tests.api.model;
+
+import api.model.CommandSuggestionRequest;
+import core.InterfaceType;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.*;
+
+/**
+ * Unit tests for CommandSuggestionRequest DTO.
+ * 
+ * Tests validation, serialization, and utility methods for the command suggestion
+ * request model used in the API layer.
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.1d
+ */
+@DisplayName("CommandSuggestionRequest Tests")
+class CommandSuggestionRequestTest {
+
+    @Test
+    @DisplayName("Should create request with required parameters")
+    void shouldCreateRequestWithRequiredParameters() {
+        // Act
+        CommandSuggestionRequest request = new CommandSuggestionRequest(
+            "git co", "user123", InterfaceType.CLI
+        );
+        
+        // Assert
+        assertThat(request.getPartialInput()).isEqualTo("git co");
+        assertThat(request.getUserId()).isEqualTo("user123");
+        assertThat(request.getInterfaceType()).isEqualTo(InterfaceType.CLI);
+        assertThat(request.getIncludeMetadata()).isTrue(); // Default value
+    }
+    
+    @Test
+    @DisplayName("Should create request with all parameters")
+    void shouldCreateRequestWithAllParameters() {
+        // Arrange
+        Map<String, Object> context = Map.of("workingDir", "/home/user");
+        Map<String, Object> filters = Map.of("type", "git");
+        
+        // Act
+        CommandSuggestionRequest request = new CommandSuggestionRequest(
+            "git checkout", "user123", InterfaceType.CLI, context, "session123", "exec123",
+            5, 0.7, true, false, 0.8, filters
+        );
+        
+        // Assert
+        assertThat(request.getPartialInput()).isEqualTo("git checkout");
+        assertThat(request.getUserId()).isEqualTo("user123");
+        assertThat(request.getInterfaceType()).isEqualTo(InterfaceType.CLI);
+        assertThat(request.getExecutionContext()).isEqualTo(context);
+        assertThat(request.getSessionId()).isEqualTo("session123");
+        assertThat(request.getExecutionId()).isEqualTo("exec123");
+        assertThat(request.getMaxSuggestions()).isEqualTo(5);
+        assertThat(request.getConfidenceThreshold()).isEqualTo(0.7);
+        assertThat(request.getIncludeCrossInterface()).isTrue();
+        assertThat(request.getIncludeMetadata()).isFalse();
+        assertThat(request.getFuzzyMatchThreshold()).isEqualTo(0.8);
+        assertThat(request.getContextFilters()).isEqualTo(filters);
+    }
+    
+    @Test
+    @DisplayName("Should detect execution context presence")
+    void shouldDetectExecutionContextPresence() {
+        // Test with context
+        CommandSuggestionRequest requestWithContext = new CommandSuggestionRequest();
+        requestWithContext.setExecutionContext(Map.of("key", "value"));
+        assertThat(requestWithContext.hasExecutionContext()).isTrue();
+        
+        // Test without context
+        CommandSuggestionRequest requestWithoutContext = new CommandSuggestionRequest();
+        assertThat(requestWithoutContext.hasExecutionContext()).isFalse();
+        
+        // Test with empty context
+        CommandSuggestionRequest requestWithEmptyContext = new CommandSuggestionRequest();
+        requestWithEmptyContext.setExecutionContext(Map.of());
+        assertThat(requestWithEmptyContext.hasExecutionContext()).isFalse();
+    }
+    
+    @Test
+    @DisplayName("Should detect context filters presence")
+    void shouldDetectContextFiltersPresence() {
+        // Test with filters
+        CommandSuggestionRequest requestWithFilters = new CommandSuggestionRequest();
+        requestWithFilters.setContextFilters(Map.of("type", "git"));
+        assertThat(requestWithFilters.hasContextFilters()).isTrue();
+        
+        // Test without filters
+        CommandSuggestionRequest requestWithoutFilters = new CommandSuggestionRequest();
+        assertThat(requestWithoutFilters.hasContextFilters()).isFalse();
+        
+        // Test with empty filters
+        CommandSuggestionRequest requestWithEmptyFilters = new CommandSuggestionRequest();
+        requestWithEmptyFilters.setContextFilters(Map.of());
+        assertThat(requestWithEmptyFilters.hasContextFilters()).isFalse();
+    }
+    
+    @Test
+    @DisplayName("Should identify general suggestion requests")
+    void shouldIdentifyGeneralSuggestionRequests() {
+        // Test with null partial input
+        CommandSuggestionRequest requestWithNull = new CommandSuggestionRequest();
+        requestWithNull.setPartialInput(null);
+        assertThat(requestWithNull.isGeneralSuggestionRequest()).isTrue();
+        
+        // Test with empty partial input
+        CommandSuggestionRequest requestWithEmpty = new CommandSuggestionRequest();
+        requestWithEmpty.setPartialInput("");
+        assertThat(requestWithEmpty.isGeneralSuggestionRequest()).isTrue();
+        
+        // Test with whitespace only
+        CommandSuggestionRequest requestWithWhitespace = new CommandSuggestionRequest();
+        requestWithWhitespace.setPartialInput("   ");
+        assertThat(requestWithWhitespace.isGeneralSuggestionRequest()).isTrue();
+        
+        // Test with actual input
+        CommandSuggestionRequest requestWithInput = new CommandSuggestionRequest();
+        requestWithInput.setPartialInput("git");
+        assertThat(requestWithInput.isGeneralSuggestionRequest()).isFalse();
+    }
+    
+    @Test
+    @DisplayName("Should trim partial input correctly")
+    void shouldTrimPartialInputCorrectly() {
+        // Test with whitespace
+        CommandSuggestionRequest request = new CommandSuggestionRequest();
+        request.setPartialInput("  git commit  ");
+        assertThat(request.getPartialInputTrimmed()).isEqualTo("git commit");
+        
+        // Test with null
+        request.setPartialInput(null);
+        assertThat(request.getPartialInputTrimmed()).isEqualTo("");
+        
+        // Test with empty
+        request.setPartialInput("");
+        assertThat(request.getPartialInputTrimmed()).isEqualTo("");
+    }
+    
+    @Test
+    @DisplayName("Should provide meaningful string representation")
+    void shouldProvideMeaningfulStringRepresentation() {
+        // Arrange
+        CommandSuggestionRequest request = new CommandSuggestionRequest(
+            "git", "user123", InterfaceType.CLI
+        );
+        request.setSessionId("session123");
+        request.setExecutionId("exec123");
+        request.setMaxSuggestions(5);
+        request.setConfidenceThreshold(0.7);
+        request.setIncludeCrossInterface(true);
+        request.setIncludeMetadata(false);
+        
+        // Act
+        String toString = request.toString();
+        
+        // Assert
+        assertThat(toString).contains("git");
+        assertThat(toString).contains("user123");
+        assertThat(toString).contains("CLI");
+        assertThat(toString).contains("session123");
+        assertThat(toString).contains("exec123");
+        assertThat(toString).contains("5");
+        assertThat(toString).contains("0.7");
+        assertThat(toString).contains("true");
+        assertThat(toString).contains("false");
+    }
+    
+    @Test
+    @DisplayName("Should handle setter methods correctly")
+    void shouldHandleSetterMethodsCorrectly() {
+        // Arrange
+        CommandSuggestionRequest request = new CommandSuggestionRequest();
+        
+        // Act
+        request.setPartialInput("npm");
+        request.setUserId("user456");
+        request.setInterfaceType(InterfaceType.WEB_UI);
+        request.setExecutionContext(Map.of("project", "webapp"));
+        request.setSessionId("web-session");
+        request.setExecutionId("web-exec");
+        request.setMaxSuggestions(3);
+        request.setConfidenceThreshold(0.8);
+        request.setIncludeCrossInterface(false);
+        request.setIncludeMetadata(true);
+        request.setFuzzyMatchThreshold(0.9);
+        request.setContextFilters(Map.of("category", "npm"));
+        
+        // Assert
+        assertThat(request.getPartialInput()).isEqualTo("npm");
+        assertThat(request.getUserId()).isEqualTo("user456");
+        assertThat(request.getInterfaceType()).isEqualTo(InterfaceType.WEB_UI);
+        assertThat(request.getExecutionContext()).containsEntry("project", "webapp");
+        assertThat(request.getSessionId()).isEqualTo("web-session");
+        assertThat(request.getExecutionId()).isEqualTo("web-exec");
+        assertThat(request.getMaxSuggestions()).isEqualTo(3);
+        assertThat(request.getConfidenceThreshold()).isEqualTo(0.8);
+        assertThat(request.getIncludeCrossInterface()).isFalse();
+        assertThat(request.getIncludeMetadata()).isTrue();
+        assertThat(request.getFuzzyMatchThreshold()).isEqualTo(0.9);
+        assertThat(request.getContextFilters()).containsEntry("category", "npm");
+    }
+    
+    @Test
+    @DisplayName("Should handle null values gracefully")
+    void shouldHandleNullValuesGracefully() {
+        // Arrange
+        CommandSuggestionRequest request = new CommandSuggestionRequest();
+        
+        // Act - Set all nullable fields to null
+        request.setPartialInput(null);
+        request.setExecutionContext(null);
+        request.setSessionId(null);
+        request.setExecutionId(null);
+        request.setMaxSuggestions(null);
+        request.setConfidenceThreshold(null);
+        request.setIncludeCrossInterface(null);
+        request.setIncludeMetadata(null);
+        request.setFuzzyMatchThreshold(null);
+        request.setContextFilters(null);
+        
+        // Assert - Should not throw exceptions
+        assertThat(request.getPartialInput()).isNull();
+        assertThat(request.getExecutionContext()).isNull();
+        assertThat(request.getSessionId()).isNull();
+        assertThat(request.getExecutionId()).isNull();
+        assertThat(request.getMaxSuggestions()).isNull();
+        assertThat(request.getConfidenceThreshold()).isNull();
+        assertThat(request.getIncludeCrossInterface()).isNull();
+        assertThat(request.getIncludeMetadata()).isNull();
+        assertThat(request.getFuzzyMatchThreshold()).isNull();
+        assertThat(request.getContextFilters()).isNull();
+        
+        // Utility methods should handle null gracefully
+        assertThat(request.isGeneralSuggestionRequest()).isTrue();
+        assertThat(request.getPartialInputTrimmed()).isEqualTo("");
+        assertThat(request.hasExecutionContext()).isFalse();
+        assertThat(request.hasContextFilters()).isFalse();
+    }
+}

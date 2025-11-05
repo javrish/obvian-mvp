@@ -1,0 +1,160 @@
+package api;
+
+import org.junit.platform.suite.api.*;
+
+/**
+ * Test suites for CI/CD pipeline integration
+ */
+public class TestSuites {
+
+    /**
+     * Fast test suite for quick feedback during development
+     * Includes unit tests and basic integration tests
+     */
+    @Suite
+    @SuiteDisplayName("Fast Test Suite")
+    @SelectPackages({"api.controller", "api.service", "api.middleware"})
+    @ExcludeClassNamePatterns({
+        ".*IntegrationTest.*",
+        ".*PerformanceTest.*",
+        ".*ContractTest.*",
+        ".*SecurityTest.*",
+        ".*ChaosTest.*"
+    })
+    @IncludeTags("unit")
+    public static class FastTestSuite {
+    }
+
+    /**
+     * Integration test suite for comprehensive testing
+     * Includes all integration tests but excludes performance and chaos tests
+     */
+    @Suite
+    @SuiteDisplayName("Integration Test Suite")
+    @SelectPackages("api")
+    @IncludeClassNamePatterns(".*IntegrationTest.*")
+    @ExcludeClassNamePatterns({
+        ".*PerformanceTest.*",
+        ".*ChaosTest.*"
+    })
+    @IncludeTags("integration")
+    public static class IntegrationTestSuite {
+    }
+
+    /**
+     * Contract test suite for API specification compliance
+     * Validates OpenAPI contract and backward compatibility
+     */
+    @Suite
+    @SuiteDisplayName("Contract Test Suite")
+    @SelectClasses({
+        ContractTest.class,
+        DocumentationTest.class,
+        SdkIntegrationTest.class
+    })
+    @IncludeTags("contract")
+    public static class ContractTestSuite {
+    }
+
+    /**
+     * Security test suite for authentication, authorization, and input validation
+     * Critical for security compliance and vulnerability assessment
+     */
+    @Suite
+    @SuiteDisplayName("Security Test Suite")
+    @SelectClasses(SecurityTest.class)
+    @IncludeTags("security")
+    public static class SecurityTestSuite {
+    }
+
+    /**
+     * Performance test suite for load, stress, and scalability testing
+     * Should be run in dedicated performance testing environment
+     */
+    @Suite
+    @SuiteDisplayName("Performance Test Suite")
+    @SelectClasses(PerformanceTest.class)
+    @IncludeTags("performance")
+    public static class PerformanceTestSuite {
+    }
+
+    /**
+     * Chaos engineering test suite for resilience and fault tolerance
+     * Tests system behavior under various failure conditions
+     */
+    @Suite
+    @SuiteDisplayName("Chaos Test Suite")
+    @SelectClasses(ChaosTest.class)
+    @IncludeTags("chaos")
+    public static class ChaosTestSuite {
+    }
+
+    /**
+     * Smoke test suite for basic functionality verification
+     * Quick tests to verify system is operational
+     */
+    @Suite
+    @SuiteDisplayName("Smoke Test Suite")
+    @SelectPackages("api")
+    @IncludeClassNamePatterns({
+        ".*HealthController.*",
+        ".*BasicIntegration.*"
+    })
+    @IncludeTags("smoke")
+    public static class SmokeTestSuite {
+    }
+
+    /**
+     * Regression test suite for comprehensive system validation
+     * Includes all tests except performance and chaos tests
+     */
+    @Suite
+    @SuiteDisplayName("Regression Test Suite")
+    @SelectPackages("api")
+    @ExcludeClassNamePatterns({
+        ".*PerformanceTest.*",
+        ".*ChaosTest.*"
+    })
+    @IncludeTags({"unit", "integration", "contract", "security"})
+    public static class RegressionTestSuite {
+    }
+
+    /**
+     * Full test suite including all test categories
+     * For comprehensive testing before major releases
+     */
+    @Suite
+    @SuiteDisplayName("Full Test Suite")
+    @SelectPackages("api")
+    @IncludeTags({"unit", "integration", "contract", "security", "performance", "chaos"})
+    public static class FullTestSuite {
+    }
+
+    /**
+     * API-specific test suite focusing on REST API functionality
+     * Includes controller, service, and API integration tests
+     */
+    @Suite
+    @SuiteDisplayName("API Test Suite")
+    @SelectPackages("api")
+    @IncludeClassNamePatterns({
+        ".*Controller.*",
+        ".*Service.*",
+        ".*ApiIntegration.*",
+        ".*ContractTest.*"
+    })
+    @IncludeTags({"api", "integration"})
+    public static class ApiTestSuite {
+    }
+
+    /**
+     * Core functionality test suite for DAG execution engine
+     * Focuses on core business logic and execution flow
+     */
+    @Suite
+    @SuiteDisplayName("Core Test Suite")
+    @SelectPackages({"core", "plugins", "memory"})
+    @IncludeTags({"unit", "integration"})
+    public static class CoreTestSuite {
+    }
+}

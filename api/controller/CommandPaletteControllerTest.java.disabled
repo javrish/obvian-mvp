@@ -1,0 +1,475 @@
+package tests.api.controller;
+
+import api.controller.CommandPaletteController;
+import api.exception.CommandPaletteException;
+import api.model.CommandAnalyticsResponse;
+import api.model.CommandSuggestionRequest;
+import api.model.CommandSuggestionResponse;
+import api.security.UserPrincipal;
+import api.service.ContextualCommandPaletteService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import core.InterfaceType;
+import core.LearningConfiguration;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.junit.jupiter.SpringJUnitTest;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
+
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+
+import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * Comprehensive test suite for CommandPaletteController.
+ * 
+ * This test class provides thorough coverage of all REST endpoints, security,
+ * validation, error handling, and edge cases for the command palette functionality.
+ * Tests include both positive and negative scenarios, performance considerations,
+ * and integration with the security framework.
+ * 
+ * Test Coverage:
+ * - All REST endpoints (GET, POST, PUT, DELETE)
+ * - JWT authentication and authorization
+ * - Request validation and sanitization
+ * - Error handling and exception scenarios
+ * - Async response handling
+ * - Rate limiting validation
+ * - Security edge cases
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.1d
+ */
+@ExtendWith(MockitoExtension.class)
+@WebMvcTest(CommandPaletteController.class)
+@SpringJUnitTest
+class CommandPaletteControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+    
+    @Autowired
+    private WebApplicationContext context;
+    
+    @MockBean
+    private ContextualCommandPaletteService commandPaletteService;
+    
+    @Autowired
+    private ObjectMapper objectMapper;
+    
+    private UserPrincipal testUser;
+    private CommandSuggestionRequest testSuggestionRequest;
+    private CommandSuggestionResponse testSuggestionResponse;
+    private CommandAnalyticsResponse testAnalyticsResponse;
+    
+    @BeforeEach
+    void setUp() {
+        mockMvc = MockMvcBuilders
+            .webAppContextSetup(context)
+            .apply(springSecurity())
+            .build();
+            
+        // Setup test data
+        testUser = UserPrincipal.create(
+            "test-user-123",
+            "testuser",
+            "test@example.com",
+            List.of("USER"),
+            List.of("READ", "WRITE"),
+            null
+        );
+        
+        testSuggestionRequest = new CommandSuggestionRequest(
+            "send em", "test-user-123", InterfaceType.CLI
+        );
+        testSuggestionRequest.setMaxSuggestions(10);
+        testSuggestionRequest.setConfidenceThreshold(0.5);
+        
+        // Mock suggestion response
+        List<CommandSuggestionResponse.CommandSuggestionDto> suggestions = List.of(
+            new CommandSuggestionResponse.CommandSuggestionDto(
+                createMockSuggestion("send email", 0.95), "send em"
+            ),
+            new CommandSuggestionResponse.CommandSuggestionDto(
+                createMockSuggestion("send emergency alert", 0.85), "send em"
+            )
+        );
+        
+        testSuggestionResponse = new CommandSuggestionResponse(
+            suggestions, "req-123", "test-user-123", InterfaceType.CLI, "send em", 150L
+        );
+        testSuggestionResponse.setLearningEnabled(true);
+        testSuggestionResponse.setCrossInterfaceUsed(true);
+        
+        // Mock analytics response
+        testAnalyticsResponse = new CommandAnalyticsResponse("test-user-123", "analytics-123", 25, 0.85);
+        testAnalyticsResponse.setRecentActivity(100L);
+        testAnalyticsResponse.setInterfaceDistribution(Map.of("CLI", 15L, "WEB", 10L));
+    }
+    
+    @Test
+    @DisplayName("GET /suggestions - Success with valid parameters")
+    @WithMockUser(roles = "USER")
+    void getSuggestions_ValidRequest_ReturnsSuccessfully() throws Exception {
+        // Given
+        when(commandPaletteService.getSuggestions(any(CommandSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(testSuggestionResponse));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .param("input", "send em")
+                .param("interface", "CLI")
+                .param("limit", "10")
+                .param("confidence_threshold", "0.5")
+                .param("include_cross_interface", "true")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER"))))
+                .andDo(print())
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.successful", is(true)))
+                .andExpect(jsonPath("$.totalSuggestions", is(2)))
+                .andExpect(jsonPath("$.suggestions", hasSize(2)))
+                .andExpect(jsonPath("$.suggestions[0].suggestion", is("send email")))
+                .andExpect(jsonPath("$.processingTimeMs", is(150)))
+                .andExpect(jsonPath("$.learningEnabled", is(true)));
+        
+        // Verify service call
+        ArgumentCaptor<CommandSuggestionRequest> requestCaptor = ArgumentCaptor.forClass(CommandSuggestionRequest.class);
+        verify(commandPaletteService).getSuggestions(requestCaptor.capture());
+        
+        CommandSuggestionRequest capturedRequest = requestCaptor.getValue();
+        assertEquals("send em", capturedRequest.getPartialInput());
+        assertEquals(InterfaceType.CLI, capturedRequest.getInterfaceType());
+        assertEquals(10, capturedRequest.getMaxSuggestions());
+        assertEquals(0.5, capturedRequest.getConfidenceThreshold(), 0.001);
+    }
+    
+    @Test
+    @DisplayName("GET /suggestions - Default parameters")
+    @WithMockUser(roles = "USER")
+    void getSuggestions_DefaultParameters_UsesDefaults() throws Exception {
+        // Given
+        when(commandPaletteService.getSuggestions(any(CommandSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(testSuggestionResponse));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER"))))
+                .andExpect(status().isOk());
+        
+        // Verify defaults
+        ArgumentCaptor<CommandSuggestionRequest> requestCaptor = ArgumentCaptor.forClass(CommandSuggestionRequest.class);
+        verify(commandPaletteService).getSuggestions(requestCaptor.capture());
+        
+        CommandSuggestionRequest capturedRequest = requestCaptor.getValue();
+        assertEquals("", capturedRequest.getPartialInput());
+        assertEquals(InterfaceType.CLI, capturedRequest.getInterfaceType());
+        assertEquals(10, capturedRequest.getMaxSuggestions());
+        assertTrue(capturedRequest.getIncludeCrossInterface());
+    }
+    
+    @Test
+    @DisplayName("GET /suggestions - Invalid parameters")
+    @WithMockUser(roles = "USER")
+    void getSuggestions_InvalidParameters_ReturnsBadRequest() throws Exception {
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .param("limit", "0") // Invalid: below minimum
+                .param("confidence_threshold", "1.5") // Invalid: above maximum
+                .with(jwt().authorities(List.of(() -> "ROLE_USER"))))
+                .andExpect(status().isBadRequest());
+    }
+    
+    @Test
+    @DisplayName("GET /suggestions - Unauthorized access")
+    void getSuggestions_NoAuthentication_ReturnsUnauthorized() throws Exception {
+        mockMvc.perform(get("/api/v1/command-palette/suggestions"))
+                .andExpect(status().isUnauthorized());
+    }
+    
+    @Test
+    @DisplayName("GET /suggestions - Service error handling")
+    @WithMockUser(roles = "USER")
+    void getSuggestions_ServiceError_ReturnsInternalServerError() throws Exception {
+        // Given
+        when(commandPaletteService.getSuggestions(any(CommandSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Service unavailable")));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER"))))
+                .andExpect(status().isInternalServerError())
+                .andExpect(jsonPath("$.errorMessage", containsString("Internal error processing suggestions")));
+    }
+    
+    @Test
+    @DisplayName("POST /learn - Success")
+    @WithMockUser(roles = "USER")
+    void recordCommandExecution_ValidRequest_ReturnsCreated() throws Exception {
+        // Given
+        CommandPaletteController.CommandExecutionLearningRequest learningRequest = 
+            new CommandPaletteController.CommandExecutionLearningRequest(
+                "send email to team", "test-user-123", InterfaceType.CLI, true, Map.of("context", "work")
+            );
+        
+        when(commandPaletteService.recordCommandExecution(
+            eq("send email to team"), eq("test-user-123"), eq(InterfaceType.CLI), eq(true), any(Map.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+        
+        // When & Then
+        mockMvc.perform(post("/api/v1/command-palette/learn")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(learningRequest))
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status", is("recorded")))
+                .andExpect(jsonPath("$.command", is("send email to team")))
+                .andExpect(jsonPath("$.userId", is("test-user-123")))
+                .andExpect(jsonPath("$.success", is(true)));
+        
+        verify(commandPaletteService).recordCommandExecution(
+            "send email to team", "test-user-123", InterfaceType.CLI, true, Map.of("context", "work")
+        );
+    }
+    
+    @Test
+    @DisplayName("POST /learn - User ID mismatch")
+    @WithMockUser(roles = "USER")
+    void recordCommandExecution_UserIdMismatch_ReturnsForbidden() throws Exception {
+        // Given
+        CommandPaletteController.CommandExecutionLearningRequest learningRequest = 
+            new CommandPaletteController.CommandExecutionLearningRequest(
+                "send email", "other-user", InterfaceType.CLI, true, null
+            );
+        
+        // When & Then
+        mockMvc.perform(post("/api/v1/command-palette/learn")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(learningRequest))
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error", containsString("User ID mismatch")));
+    }
+    
+    @Test
+    @DisplayName("POST /learn - Invalid request body")
+    @WithMockUser(roles = "USER")
+    void recordCommandExecution_InvalidRequest_ReturnsBadRequest() throws Exception {
+        // Given - request with missing required fields
+        Map<String, Object> invalidRequest = Map.of(
+            "command", "", // Empty command
+            "userId", "test-user-123"
+            // Missing interfaceType
+        );
+        
+        // When & Then
+        mockMvc.perform(post("/api/v1/command-palette/learn")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(invalidRequest))
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isBadRequest());
+    }
+    
+    @Test
+    @DisplayName("GET /analytics - Success")
+    @WithMockUser(roles = "USER")
+    void getCommandAnalytics_ValidRequest_ReturnsAnalytics() throws Exception {
+        // Given
+        when(commandPaletteService.getCommandAnalytics("test-user-123"))
+            .thenReturn(CompletableFuture.completedFuture(testAnalyticsResponse));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/analytics")
+                .param("timeframe", "30d")
+                .param("interface", "CLI")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.successful", is(true)))
+                .andExpect(jsonPath("$.userId", is("test-user-123")))
+                .andExpect(jsonPath("$.totalPatterns", is(25)))
+                .andExpect(jsonPath("$.successRate", is(0.85)))
+                .andExpect(jsonPath("$.recentActivity", is(100)))
+                .andExpect(jsonPath("$.interfaceDistribution.CLI", is(15)))
+                .andExpect(jsonPath("$.interfaceDistribution.WEB", is(10)));
+        
+        verify(commandPaletteService).getCommandAnalytics("test-user-123");
+    }
+    
+    @Test
+    @DisplayName("PUT /configuration - Success")
+    @WithMockUser(roles = "USER")
+    void updateConfiguration_ValidRequest_ReturnsUpdated() throws Exception {
+        // Given
+        CommandPaletteController.LearningConfigurationRequest configRequest = 
+            new CommandPaletteController.LearningConfigurationRequest();
+        configRequest.setLearningEnabled(true);
+        configRequest.setCrossInterfaceLearning(true);
+        configRequest.setConfidenceThreshold(0.7);
+        configRequest.setMaxSuggestions(15);
+        configRequest.setFuzzyMatchThreshold(0.8);
+        configRequest.setPrivacyMode(false);
+        
+        when(commandPaletteService.updateLearningConfiguration(eq("test-user-123"), any(LearningConfiguration.class)))
+            .thenReturn(CompletableFuture.completedFuture(null));
+        
+        // When & Then
+        mockMvc.perform(put("/api/v1/command-palette/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(configRequest))
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("updated")))
+                .andExpect(jsonPath("$.userId", is("test-user-123")))
+                .andExpect(jsonPath("$.configuration.learningEnabled", is(true)))
+                .andExpect(jsonPath("$.configuration.confidenceThreshold", is(0.7)));
+        
+        // Verify service call
+        ArgumentCaptor<LearningConfiguration> configCaptor = ArgumentCaptor.forClass(LearningConfiguration.class);
+        verify(commandPaletteService).updateLearningConfiguration(eq("test-user-123"), configCaptor.capture());
+        
+        LearningConfiguration capturedConfig = configCaptor.getValue();
+        assertTrue(capturedConfig.isEnabled());
+        assertTrue(capturedConfig.isCrossInterfaceLearning());
+        assertEquals(0.7, capturedConfig.getConfidenceThreshold(), 0.001);
+        assertEquals(15, capturedConfig.getMaxSuggestions());
+    }
+    
+    @Test
+    @DisplayName("DELETE /data - Success")
+    @WithMockUser(roles = "USER")
+    void clearLearningData_ValidRequest_ReturnsSuccess() throws Exception {
+        // Given
+        when(commandPaletteService.clearLearningData("test-user-123"))
+            .thenReturn(CompletableFuture.completedFuture(null));
+        
+        // When & Then
+        mockMvc.perform(delete("/api/v1/command-palette/data")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("cleared")))
+                .andExpect(jsonPath("$.userId", is("test-user-123")))
+                .andExpect(jsonPath("$.message", containsString("permanently deleted")));
+        
+        verify(commandPaletteService).clearLearningData("test-user-123");
+    }
+    
+    @Test
+    @DisplayName("GET /health - Success")
+    void getHealthStatus_ReturnsHealthInfo() throws Exception {
+        // Given
+        Map<String, Object> healthStatus = Map.of(
+            "service", "ContextualCommandPaletteService",
+            "status", "healthy",
+            "learningEngineEnabled", true,
+            "metrics", Map.of("totalRequests", 1000, "successRate", 0.95)
+        );
+        
+        when(commandPaletteService.getHealthStatus()).thenReturn(healthStatus);
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status", is("healthy")))
+                .andExpect(jsonPath("$.service", is("ContextualCommandPaletteService")))
+                .andExpect(jsonPath("$.controller", is("CommandPaletteController")))
+                .andExpect(jsonPath("$.controllerStatus", is("healthy")))
+                .andExpect(jsonPath("$.endpoints").exists())
+                .andExpect(jsonPath("$.learningEngineEnabled", is(true)));
+    }
+    
+    @Test
+    @DisplayName("GET /health - Service error")
+    void getHealthStatus_ServiceError_ReturnsServiceUnavailable() throws Exception {
+        // Given
+        when(commandPaletteService.getHealthStatus()).thenThrow(new RuntimeException("Database connection failed"));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/health"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.status", is("unhealthy")))
+                .andExpect(jsonPath("$.error", containsString("Database connection failed")));
+    }
+    
+    @Test
+    @DisplayName("Rate limiting validation")
+    @WithMockUser(roles = "USER")
+    void getSuggestions_RateLimitExceeded_ReturnsTooManyRequests() throws Exception {
+        // Given - Mock rate limit exceeded response
+        CommandSuggestionResponse rateLimitResponse = new CommandSuggestionResponse(
+            null, "test-user-123", "Rate limit exceeded. Please try again later."
+        );
+        
+        when(commandPaletteService.getSuggestions(any(CommandSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(rateLimitResponse));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER")).jwt(jwt -> jwt.subject("test-user-123"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errorMessage", containsString("Rate limit exceeded")));
+    }
+    
+    @Test
+    @DisplayName("Cross-Origin Resource Sharing (CORS) validation")
+    @WithMockUser(roles = "USER")
+    void corsValidation_AllowsConfiguredOrigins() throws Exception {
+        // Given
+        when(commandPaletteService.getSuggestions(any(CommandSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(testSuggestionResponse));
+        
+        // When & Then
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .header("Origin", "https://app.obvian.com")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER"))))
+                .andExpect(status().isOk());
+    }
+    
+    @Test
+    @DisplayName("Input validation - XSS prevention")
+    @WithMockUser(roles = "USER")
+    void inputValidation_PreventXSS_SanitizesInput() throws Exception {
+        // Given
+        when(commandPaletteService.getSuggestions(any(CommandSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(testSuggestionResponse));
+        
+        // When & Then - Test that XSS attempts are handled
+        mockMvc.perform(get("/api/v1/command-palette/suggestions")
+                .param("input", "<script>alert('xss')</script>")
+                .with(jwt().authorities(List.of(() -> "ROLE_USER"))))
+                .andExpect(status().isOk()); // Should not fail due to input sanitization
+    }
+    
+    // Helper methods
+    
+    private core.CommandSuggestion createMockSuggestion(String command, double confidence) {
+        return new core.CommandSuggestion(
+            command,
+            confidence,
+            InterfaceType.CLI,
+            Map.of("category", "communication"),
+            List.of("email", "send"),
+            "Send an email message"
+        );
+    }
+}

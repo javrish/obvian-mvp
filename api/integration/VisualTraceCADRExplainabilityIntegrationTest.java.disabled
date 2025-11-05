@@ -1,0 +1,658 @@
+package api.integration;
+
+import api.ObvianApiApplication;
+import api.config.BaseSpringIntegrationTest;
+import api.service.VisualTraceService;
+import core.*;
+import core.explainability.*;
+import memory.*;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Comprehensive integration tests for Visual Trace Logging system integration 
+ * with CADR (Causal Analysis and Dependency Resolution) and Explainability systems.
+ * 
+ * Tests the integration between:
+ * - Visual Trace Logging ↔ CADR System
+ * - Visual Trace Logging ↔ Explainability Framework
+ * - CADR ↔ Explainability Systems
+ * - Cross-system data consistency and causal relationship tracking
+ * - Memory integration with causal graph construction
+ * - Dynamic causal model updates during execution
+ * 
+ * Key Integration Points:
+ * - CausalGraphConstruction integration with visual traces
+ * - DynamicCausalModelUpdates during DAG execution
+ * - TemporalExecutionTimeline with causal relationships
+ * - InteractiveTracePlayer with causal navigation
+ * - Memory persistence of causal data
+ * - Cross-system performance and consistency
+ * 
+ * Test Categories:
+ * - CADR system integration
+ * - Explainability framework integration
+ * - Cross-system data consistency
+ * - Causal relationship tracking
+ * - Memory integration
+ * - Performance with causal analysis
+ * - Error handling across systems
+ */
+@SpringBootTest(
+    classes = {ObvianApiApplication.class},
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
+@ActiveProfiles("integration-test")
+@TestPropertySource(properties = {
+    "spring.main.allow-bean-definition-overriding=true",
+    "logging.level.memory=DEBUG",
+    "logging.level.core.explainability=DEBUG",
+    "obvian.cadr.enabled=true",
+    "obvian.explainability.detailed=true",
+    "obvian.visual-trace.causal-integration=true",
+    "obvian.memory.causal-persistence=true"
+})
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class VisualTraceCADRExplainabilityIntegrationTest extends BaseSpringIntegrationTest {
+
+    @Autowired
+    private DagExecutor dagExecutor;
+
+    @Autowired
+    private VisualTraceService visualTraceService;
+
+    @Autowired
+    private VisualTraceRenderer visualTraceRenderer;
+
+    @Autowired
+    private ExplainabilityService explainabilityService;
+
+    @Autowired
+    private CausalGraphConstruction causalGraphConstruction;
+
+    @Autowired
+    private DynamicCausalModelUpdates causalModelUpdates;
+
+    @Autowired
+    private TemporalExecutionTimeline temporalTimeline;
+
+    @Autowired
+    private InteractiveTracePlayer tracePlayer;
+
+    @Autowired
+    private MemoryStore memoryStore;
+
+    private String testUserId;
+    private String testExecutionId;
+    private ExecutionContext testContext;
+
+    @BeforeEach
+    @Override
+    protected void setUp() {
+        super.setUp();
+        testUserId = "cadr-test-user-" + System.currentTimeMillis();
+        testExecutionId = "cadr-exec-" + System.currentTimeMillis();
+        
+        testContext = new ExecutionContext();
+        testContext.setExecutionId(testExecutionId);
+        testContext.setUserId(testUserId);
+        testContext.getGlobalContext().put("cadr.enabled", "true");
+        testContext.getGlobalContext().put("explainability.detailed", "true");
+        
+        // Clear memory and initialize fresh state
+        memoryStore.clearMemory();
+    }
+
+    @AfterEach
+    @Override
+    protected void tearDown() {
+        super.tearDown();
+        memoryStore.clearMemory();
+    }
+
+    // ===== CADR System Integration Tests =====
+
+    @Test
+    @Order(1)
+    @DisplayName("CADR Integration: Causal graph construction during DAG execution")
+    void testCausalGraphConstructionDuringDAGExecution() throws Exception {
+        // Given - DAG with clear causal dependencies
+        List<TaskNode> nodes = createCausalDAGNodes();
+        Dag causalDAG = createDAGWithCausalRelationships(nodes);
+        
+        // When - Execute DAG with CADR enabled
+        DagExecutionResult result = dagExecutor.executeDag(causalDAG, testContext);
+        
+        // Then - Verify execution completed
+        assertThat(result.getExecutionStatus()).isEqualTo(DagExecutionResult.ExecutionStatus.COMPLETED);
+        
+        // And - Verify causal graph was constructed
+        CausalGraphConstruction.CausalGraph userGraph = causalGraphConstruction.getUserCausalGraph(testUserId);
+        assertThat(userGraph).isNotNull();
+        assertThat(userGraph.getNodes()).isNotEmpty();
+        assertThat(userGraph.getEdges()).isNotEmpty();
+        
+        // Verify causal nodes correspond to DAG nodes
+        Set<String> dagNodeIds = nodes.stream().map(TaskNode::getId).collect(Collectors.toSet());
+        Set<String> causalNodeIds = userGraph.getNodes().keySet();
+        assertThat(causalNodeIds).containsAll(dagNodeIds);
+        
+        // Verify causal edges reflect DAG dependencies
+        for (TaskNode node : nodes) {
+            if (!node.getDependencies().isEmpty()) {
+                for (String dependency : node.getDependencies()) {
+                    String edgeId = "rel-" + dependency + "-" + node.getId();
+                    assertThat(userGraph.getEdges()).containsKey(edgeId);
+                    
+                    CausalGraphConstruction.CausalEdge edge = userGraph.getEdges().get(edgeId);
+                    assertThat(edge.getCauseNodeId()).isEqualTo(dependency);
+                    assertThat(edge.getEffectNodeId()).isEqualTo(node.getId());
+                    assertThat(edge.getStrength()).isGreaterThan(0.0);
+                }
+            }
+        }
+        
+        System.out.println("✓ Causal graph constructed with " + userGraph.getNodes().size() + " nodes");
+        System.out.println("✓ Causal graph has " + userGraph.getEdges().size() + " causal relationships");
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("CADR Integration: Dynamic causal model updates during execution")
+    void testDynamicCausalModelUpdatesDuringExecution() throws Exception {
+        // Given - Execute initial DAG to establish baseline causal model
+        List<TaskNode> initialNodes = createCausalDAGNodes();
+        Dag initialDAG = createDAGWithCausalRelationships(initialNodes);
+        dagExecutor.executeDag(initialDAG, testContext);
+        
+        // Create a second execution with modified relationships
+        String secondExecutionId = "cadr-update-" + System.currentTimeMillis();
+        ExecutionContext secondContext = new ExecutionContext();
+        secondContext.setExecutionId(secondExecutionId);
+        secondContext.setUserId(testUserId);
+        secondContext.getGlobalContext().put("cadr.enabled", "true");
+        
+        List<TaskNode> modifiedNodes = createModifiedCausalDAGNodes();
+        Dag modifiedDAG = createDAGWithCausalRelationships(modifiedNodes);
+        
+        // When - Execute modified DAG to trigger causal model updates
+        DagExecutionResult secondResult = dagExecutor.executeDag(modifiedDAG, secondContext);
+        
+        // Then - Verify both executions completed
+        assertThat(secondResult.getExecutionStatus()).isEqualTo(DagExecutionResult.ExecutionStatus.COMPLETED);
+        
+        // And - Verify dynamic causal model updates occurred
+        CausalGraphConstruction.CausalGraph updatedGraph = causalGraphConstruction.getUserCausalGraph(testUserId);
+        assertThat(updatedGraph).isNotNull();
+        
+        // Check for causal strength estimates for key relationships
+        String relationshipId = "rel-input-node-process-node";
+        DynamicCausalModelUpdates.CausalStrengthEstimate estimate = 
+            causalModelUpdates.getCausalStrength(relationshipId);
+        
+        if (estimate != null) {
+            assertThat(estimate.getStrength()).isBetween(0.0, 1.0);
+            assertThat(estimate.getConfidence()).isBetween(0.0, 1.0);
+            assertThat(estimate.getObservationCount()).isGreaterThan(1); // At least 2 executions
+            assertThat(estimate.getConfidenceInterval()).isNotNull();
+            
+            System.out.println("✓ Causal strength estimate: " + estimate.getStrength() + 
+                             " (confidence: " + estimate.getConfidence() + ")");
+        }
+        
+        // Verify causal model learning from multiple executions
+        assertThat(updatedGraph.getEdges().size()).isGreaterThanOrEqualTo(initialNodes.size() - 1);
+        
+        System.out.println("✓ Dynamic causal model updates verified across " + 
+                         "2 executions for user " + testUserId);
+    }
+
+    @Test
+    @Order(3)
+    @DisplayName("CADR Integration: Visual trace renderer causal relationship visualization")
+    void testVisualTraceRendererCausalRelationshipVisualization() throws Exception {
+        // Given - Execute DAG with established causal relationships
+        List<TaskNode> nodes = createCausalDAGNodes();
+        Dag causalDAG = createDAGWithCausalRelationships(nodes);
+        dagExecutor.executeDag(causalDAG, testContext);
+        
+        // When - Get execution trace and render visual trace
+        ExecutionTrace trace = explainabilityService.getExecutionTrace(testExecutionId);
+        VisualTraceRenderer.TimelineVisualization timeline = visualTraceRenderer.renderTimeline(trace);
+        
+        // Then - Verify timeline includes causal information
+        assertThat(timeline).isNotNull();
+        assertThat(timeline.getDependencyConnections()).isNotEmpty();
+        
+        // Verify dependency connections have causal strength information
+        for (VisualTraceRenderer.DependencyConnection connection : timeline.getDependencyConnections()) {
+            assertThat(connection.getSourceNodeId()).isNotBlank();
+            assertThat(connection.getTargetNodeId()).isNotBlank();
+            assertThat(connection.getStrength()).isBetween(0.0, 1.0);
+        }
+        
+        // Test individual dependency path visualization
+        if (nodes.size() >= 2) {
+            String sourceNodeId = nodes.get(0).getId();
+            String targetNodeId = nodes.get(nodes.size() - 1).getId();
+            
+            VisualTraceRenderer.DependencyPathVisualization pathViz = 
+                visualTraceRenderer.renderDependencyPath(sourceNodeId, targetNodeId);
+            
+            assertThat(pathViz).isNotNull();
+            assertThat(pathViz.getSourceNodeId()).isEqualTo(sourceNodeId);
+            assertThat(pathViz.getTargetNodeId()).isEqualTo(targetNodeId);
+            
+            if (pathViz.getPathType() != VisualTraceRenderer.PathType.NO_PATH) {
+                assertThat(pathViz.getPathSegments()).isNotEmpty();
+                assertThat(pathViz.getCausalStrength()).isGreaterThan(0.0);
+                
+                // If indirect path, verify intermediate nodes
+                if (pathViz.getPathType() == VisualTraceRenderer.PathType.INDIRECT) {
+                    assertThat(pathViz.getIntermediateNodes()).isNotEmpty();
+                }
+            }
+            
+            System.out.println("✓ Dependency path visualization: " + pathViz.getPathType() + 
+                             " (strength: " + pathViz.getCausalStrength() + ")");
+        }
+        
+        System.out.println("✓ Visual trace renderer integrated " + 
+                         timeline.getDependencyConnections().size() + " causal relationships");
+    }
+
+    // ===== Explainability Framework Integration Tests =====
+
+    @Test
+    @Order(4)
+    @DisplayName("Explainability Integration: Comprehensive trace data with causal context")
+    void testExplainabilityIntegrationComprehensiveTraceDataWithCausalContext() throws Exception {
+        // Given - Complex DAG with multiple decision points
+        List<TaskNode> nodes = createComplexExplainabilityDAGNodes();
+        Dag explainabilityDAG = createDAGWithExplainabilityFeatures(nodes);
+        
+        // When - Execute with detailed explainability enabled
+        DagExecutionResult result = dagExecutor.executeDag(explainabilityDAG, testContext);
+        
+        // Then - Verify execution completed
+        assertThat(result.getExecutionStatus()).isEqualTo(DagExecutionResult.ExecutionStatus.COMPLETED);
+        
+        // And - Verify comprehensive trace data captured
+        ExecutionTrace trace = explainabilityService.getExecutionTrace(testExecutionId);
+        assertThat(trace).isNotNull();
+        assertThat(trace.getDecisions()).isNotEmpty();
+        
+        // Verify different types of decisions are captured
+        Set<ExecutionTrace.DecisionType> decisionTypes = trace.getDecisions().stream()
+            .map(ExecutionTrace.DecisionPoint::getType)
+            .collect(Collectors.toSet());
+        
+        assertThat(decisionTypes).contains(ExecutionTrace.DecisionType.NODE_EXECUTION_ORDER);
+        assertThat(decisionTypes).contains(ExecutionTrace.DecisionType.DEPENDENCY_WAIT);
+        
+        // Verify causal context in decision metadata
+        boolean hasCausalContext = trace.getDecisions().stream()
+            .anyMatch(decision -> decision.getMetadata().containsKey("causalStrength") ||
+                                decision.getMetadata().containsKey("dependency"));
+        assertThat(hasCausalContext).isTrue();
+        
+        // Verify temporal execution timeline integration
+        if (memoryStore.getTemporalTimeline(testExecutionId) != null) {
+            TemporalExecutionTimeline timeline = memoryStore.getTemporalTimeline(testExecutionId);
+            List<TemporalExecutionTimeline.ExecutionEvent> events = timeline.getAllEvents();
+            assertThat(events).isNotEmpty();
+            
+            // Verify events have causal context
+            boolean hasNodeEvents = events.stream()
+                .anyMatch(event -> event.getEventType() == TemporalExecutionTimeline.EventType.NODE_START ||
+                                 event.getEventType() == TemporalExecutionTimeline.EventType.NODE_COMPLETE);
+            assertThat(hasNodeEvents).isTrue();
+        }
+        
+        System.out.println("✓ Explainability captured " + trace.getDecisions().size() + " decisions");
+        System.out.println("✓ Decision types: " + decisionTypes);
+    }
+
+    @Test
+    @Order(5)
+    @DisplayName("Explainability Integration: Interactive trace player with causal navigation")
+    void testExplainabilityIntegrationInteractiveTracePlayerWithCausalNavigation() throws Exception {
+        // Given - Execute DAG to have trace data
+        List<TaskNode> nodes = createCausalDAGNodes();
+        Dag causalDAG = createDAGWithCausalRelationships(nodes);
+        dagExecutor.executeDag(causalDAG, testContext);
+        
+        ExecutionTrace trace = explainabilityService.getExecutionTrace(testExecutionId);
+        
+        // When - Use interactive trace player for causal navigation
+        CompletableFuture<Void> playbackFuture = tracePlayer.play(trace);
+        
+        // Control playback to test causal navigation
+        boolean canStepForward = tracePlayer.stepForward();
+        InteractiveTracePlayer.PlaybackState currentState = tracePlayer.getCurrentState();
+        
+        // Then - Verify playback functionality
+        assertThat(playbackFuture).isNotNull();
+        assertThat(canStepForward).isTrue(); // Should be able to step through trace
+        assertThat(currentState).isNotNull();
+        
+        // Verify playback state includes causal context
+        if (currentState.getCurrentStepIndex() >= 0) {
+            assertThat(currentState.getCurrentStepIndex()).isGreaterThanOrEqualTo(0);
+            assertThat(currentState.getStatus()).isNotNull();
+        }
+        
+        // Test jumping to specific causal relationships
+        if (nodes.size() >= 2) {
+            String targetNodeId = nodes.get(1).getId();
+            boolean canJumpToNode = tracePlayer.jumpToNode(targetNodeId);
+            
+            if (canJumpToNode) {
+                InteractiveTracePlayer.PlaybackState afterJump = tracePlayer.getCurrentState();
+                assertThat(afterJump.getCurrentStepIndex()).isNotEqualTo(currentState.getCurrentStepIndex());
+                System.out.println("✓ Successfully jumped to node: " + targetNodeId);
+            }
+        }
+        
+        // Test breakpoint functionality with causal nodes
+        Set<String> nodeIds = nodes.stream().map(TaskNode::getId).collect(Collectors.toSet());
+        for (String nodeId : nodeIds) {
+            tracePlayer.addBreakpoint(nodeId);
+        }
+        
+        Set<String> breakpoints = tracePlayer.getBreakpoints();
+        assertThat(breakpoints).containsAll(nodeIds);
+        
+        // Cleanup
+        tracePlayer.stop();
+        
+        System.out.println("✓ Interactive trace player supports causal navigation");
+        System.out.println("✓ Set " + breakpoints.size() + " breakpoints on causal nodes");
+    }
+
+    // ===== Cross-System Data Consistency Tests =====
+
+    @Test
+    @Order(6)
+    @DisplayName("Cross-System: Data consistency across CADR, Explainability, and Visual Trace")
+    void testCrossSystemDataConsistencyAcrossCADRExplainabilityAndVisualTrace() throws Exception {
+        // Given - Execute DAG that touches all systems
+        List<TaskNode> nodes = createCrossSystemTestDAGNodes();
+        Dag crossSystemDAG = createDAGWithCausalRelationships(nodes);
+        
+        // When - Execute and gather data from all systems
+        DagExecutionResult result = dagExecutor.executeDag(crossSystemDAG, testContext);
+        
+        // Gather data from all systems
+        ExecutionTrace trace = explainabilityService.getExecutionTrace(testExecutionId);
+        CausalGraphConstruction.CausalGraph causalGraph = causalGraphConstruction.getUserCausalGraph(testUserId);
+        VisualTraceRenderer.TimelineVisualization timeline = visualTraceRenderer.renderTimeline(trace);
+        VisualTraceService.VisualTraceData serviceData = visualTraceService.getVisualTraceData(testExecutionId);
+        
+        // Then - Verify cross-system data consistency
+        
+        // 1. Node consistency across systems
+        Set<String> dagNodeIds = nodes.stream().map(TaskNode::getId).collect(Collectors.toSet());
+        Set<String> causalNodeIds = causalGraph.getNodes().keySet();
+        Set<String> timelineNodeIds = timeline.getNodeExecutions().stream()
+            .map(VisualTraceRenderer.NodeExecutionVisualization::getNodeId)
+            .collect(Collectors.toSet());
+        Set<String> serviceNodeIds = serviceData.getTimeline().getNodeExecutions().stream()
+            .map(node -> node.getNodeId())
+            .collect(Collectors.toSet());
+        
+        assertThat(causalNodeIds).containsAll(dagNodeIds);
+        assertThat(timelineNodeIds).containsAll(dagNodeIds);
+        assertThat(serviceNodeIds).containsAll(dagNodeIds);
+        
+        // 2. Execution timing consistency
+        Instant traceStartTime = trace.getStartTime();
+        Instant timelineStart = timeline.getStartTime();
+        Duration timelineDuration = timeline.getTotalDuration();
+        Duration traceDuration = Duration.between(trace.getStartTime(), trace.getEndTime());
+        
+        assertThat(timelineStart).isEqualTo(traceStartTime);
+        assertThat(timelineDuration).isEqualTo(traceDuration);
+        
+        // 3. Causal relationship consistency
+        int causalEdgeCount = causalGraph.getEdges().size();
+        int timelineDependencyCount = timeline.getDependencyConnections().size();
+        
+        // Should have some relationship (may not be exact due to different granularities)
+        assertThat(causalEdgeCount).isGreaterThan(0);
+        assertThat(timelineDependencyCount).isGreaterThan(0);
+        
+        // 4. Decision consistency between explainability and visual trace
+        int traceDecisionCount = trace.getDecisions().size();
+        int timelineSegmentCount = timeline.getTimelineSegments().size();
+        
+        assertThat(traceDecisionCount).isEqualTo(timelineSegmentCount);
+        
+        // 5. Memory persistence consistency
+        TemporalExecutionTimeline persistedTimeline = memoryStore.getTemporalTimeline(testExecutionId);
+        if (persistedTimeline != null) {
+            List<TemporalExecutionTimeline.ExecutionEvent> persistedEvents = persistedTimeline.getAllEvents();
+            assertThat(persistedEvents).isNotEmpty();
+        }
+        
+        System.out.println("✓ Cross-system consistency verified:");
+        System.out.println("  - Nodes: DAG(" + dagNodeIds.size() + "), Causal(" + causalNodeIds.size() + 
+                         "), Timeline(" + timelineNodeIds.size() + ")");
+        System.out.println("  - Causal edges: " + causalEdgeCount + ", Dependencies: " + timelineDependencyCount);
+        System.out.println("  - Decisions: " + traceDecisionCount + ", Timeline segments: " + timelineSegmentCount);
+    }
+
+    @Test
+    @Order(7)
+    @DisplayName("Cross-System: Performance with integrated causal analysis")
+    void testCrossSystemPerformanceWithIntegratedCausalAnalysis() throws Exception {
+        // Given - Large DAG for performance testing
+        List<TaskNode> largeNodes = createLargeCausalDAGNodes(25); // Moderate size for integration test
+        Dag largeDAG = createDAGWithCausalRelationships(largeNodes);
+        
+        // When - Execute with full CADR and explainability integration
+        long startTime = System.currentTimeMillis();
+        DagExecutionResult result = dagExecutor.executeDag(largeDAG, testContext);
+        long executionTime = System.currentTimeMillis() - startTime;
+        
+        // Measure causal analysis performance
+        long causalStartTime = System.currentTimeMillis();
+        CausalGraphConstruction.CausalGraph causalGraph = causalGraphConstruction.getUserCausalGraph(testUserId);
+        long causalTime = System.currentTimeMillis() - causalStartTime;
+        
+        // Measure visual trace rendering performance
+        long renderStartTime = System.currentTimeMillis();
+        ExecutionTrace trace = explainabilityService.getExecutionTrace(testExecutionId);
+        VisualTraceRenderer.TimelineVisualization timeline = visualTraceRenderer.renderTimeline(trace);
+        long renderTime = System.currentTimeMillis() - renderStartTime;
+        
+        // Then - Verify performance requirements
+        assertThat(result.getExecutionStatus()).isEqualTo(DagExecutionResult.ExecutionStatus.COMPLETED);
+        
+        // Execution should complete within reasonable time
+        assertThat(executionTime).as("Execution with CADR integration should be reasonable")
+            .isLessThan(5000); // 5 seconds for 25 nodes
+        
+        // Causal analysis should be performant
+        assertThat(causalTime).as("Causal graph access should be fast")
+            .isLessThan(100); // 100ms
+        
+        // Visual trace rendering should meet performance requirements
+        assertThat(renderTime).as("Visual trace rendering should be under 100ms")
+            .isLessThan(100);
+        
+        // Verify data quality with performance
+        assertThat(causalGraph.getNodes()).hasSize(largeNodes.size());
+        assertThat(causalGraph.getEdges().size()).isGreaterThan(largeNodes.size() - 5); // Most nodes should have causal relationships
+        assertThat(timeline.getNodeExecutions()).hasSize(largeNodes.size());
+        
+        System.out.println("✓ Performance with integrated causal analysis:");
+        System.out.println("  - Execution: " + executionTime + "ms for " + largeNodes.size() + " nodes");
+        System.out.println("  - Causal analysis: " + causalTime + "ms");
+        System.out.println("  - Visual rendering: " + renderTime + "ms");
+        System.out.println("  - Causal relationships: " + causalGraph.getEdges().size());
+    }
+
+    // ===== Helper Methods =====
+
+    private List<TaskNode> createCausalDAGNodes() {
+        List<TaskNode> nodes = new ArrayList<>();
+        
+        TaskNode inputNode = new TaskNode("input-node", "data-input");
+        inputNode.setInputParams(Map.of("source", "database", "causalType", "root"));
+        nodes.add(inputNode);
+        
+        TaskNode processNode = new TaskNode("process-node", "data-processing");
+        processNode.setInputParams(Map.of("algorithm", "ml-model", "causalType", "processor"));
+        processNode.addDependency("input-node");
+        nodes.add(processNode);
+        
+        TaskNode validateNode = new TaskNode("validate-node", "data-validation");
+        validateNode.setInputParams(Map.of("validationType", "schema", "causalType", "validator"));
+        validateNode.addDependency("process-node");
+        nodes.add(validateNode);
+        
+        TaskNode outputNode = new TaskNode("output-node", "data-output");
+        outputNode.setInputParams(Map.of("destination", "api", "causalType", "sink"));
+        outputNode.addDependency("validate-node");
+        nodes.add(outputNode);
+        
+        return nodes;
+    }
+
+    private List<TaskNode> createModifiedCausalDAGNodes() {
+        List<TaskNode> nodes = createCausalDAGNodes();
+        
+        // Add parallel processing branch to modify causal relationships
+        TaskNode parallelProcessNode = new TaskNode("parallel-process-node", "parallel-processing");
+        parallelProcessNode.setInputParams(Map.of("algorithm", "alternative-ml", "causalType", "parallel-processor"));
+        parallelProcessNode.addDependency("input-node");
+        nodes.add(parallelProcessNode);
+        
+        // Modify output node to depend on both processing branches
+        TaskNode outputNode = nodes.stream()
+            .filter(node -> "output-node".equals(node.getId()))
+            .findFirst()
+            .orElseThrow();
+        outputNode.addDependency("parallel-process-node");
+        
+        return nodes;
+    }
+
+    private List<TaskNode> createComplexExplainabilityDAGNodes() {
+        List<TaskNode> nodes = createCausalDAGNodes();
+        
+        // Add conditional branching for explainability testing
+        TaskNode conditionalNode = new TaskNode("conditional-node", "conditional-processing");
+        conditionalNode.setInputParams(Map.of("condition", "data-quality > 0.8", "explainabilityType", "conditional"));
+        conditionalNode.addDependency("process-node");
+        nodes.add(conditionalNode);
+        
+        TaskNode fallbackNode = new TaskNode("fallback-node", "fallback-processing");
+        fallbackNode.setInputParams(Map.of("fallbackReason", "quality-check-failed", "explainabilityType", "fallback"));
+        fallbackNode.addDependency("process-node");
+        nodes.add(fallbackNode);
+        
+        return nodes;
+    }
+
+    private List<TaskNode> createCrossSystemTestDAGNodes() {
+        List<TaskNode> nodes = new ArrayList<>();
+        
+        // Create nodes that exercise all systems
+        TaskNode rootNode = new TaskNode("cross-root", "cross-system-root");
+        rootNode.setInputParams(Map.of("systemType", "cross-integration", "testPhase", "root"));
+        nodes.add(rootNode);
+        
+        TaskNode cadrNode = new TaskNode("cadr-test-node", "cadr-specific-action");
+        cadrNode.setInputParams(Map.of("cadrFeature", "dependency-analysis", "testPhase", "cadr"));
+        cadrNode.addDependency("cross-root");
+        nodes.add(cadrNode);
+        
+        TaskNode explainabilityNode = new TaskNode("explainability-test-node", "explainability-specific-action");
+        explainabilityNode.setInputParams(Map.of("explainabilityFeature", "decision-tracking", "testPhase", "explainability"));
+        explainabilityNode.addDependency("cross-root");
+        nodes.add(explainabilityNode);
+        
+        TaskNode visualNode = new TaskNode("visual-test-node", "visual-specific-action");
+        visualNode.setInputParams(Map.of("visualFeature", "timeline-rendering", "testPhase", "visual"));
+        visualNode.addDependency("cadr-test-node");
+        visualNode.addDependency("explainability-test-node");
+        nodes.add(visualNode);
+        
+        return nodes;
+    }
+
+    private List<TaskNode> createLargeCausalDAGNodes(int nodeCount) {
+        List<TaskNode> nodes = new ArrayList<>();
+        
+        // Create root node
+        TaskNode rootNode = new TaskNode("large-root", "large-dag-root");
+        rootNode.setInputParams(Map.of("nodeCount", nodeCount, "testType", "performance"));
+        nodes.add(rootNode);
+        
+        // Create layers with causal relationships
+        String previousLayerPrefix = "large-root";
+        for (int layer = 1; layer <= 4; layer++) {
+            int nodesInLayer = Math.max(1, (nodeCount - 1) / 4);
+            for (int i = 0; i < nodesInLayer && nodes.size() < nodeCount; i++) {
+                String nodeId = "large-l" + layer + "-n" + i;
+                TaskNode node = new TaskNode(nodeId, "large-action-" + layer + "-" + i);
+                node.setInputParams(Map.of("layer", layer, "index", i, "causalStrength", 0.7 + (i * 0.05)));
+                
+                if (layer == 1) {
+                    node.addDependency(previousLayerPrefix);
+                } else {
+                    // Depend on nodes from previous layer
+                    String depNodeId = "large-l" + (layer - 1) + "-n" + (i % Math.max(1, nodesInLayer));
+                    node.addDependency(depNodeId);
+                }
+                
+                nodes.add(node);
+            }
+        }
+        
+        return nodes;
+    }
+
+    private Dag createDAGWithCausalRelationships(List<TaskNode> nodes) {
+        Dag dag = new Dag("cadr-dag-" + System.currentTimeMillis());
+        nodes.forEach(dag::addNode);
+        return dag;
+    }
+
+    private Dag createDAGWithExplainabilityFeatures(List<TaskNode> nodes) {
+        Dag dag = new Dag("explainability-dag-" + System.currentTimeMillis());
+        nodes.forEach(dag::addNode);
+        
+        // Add explainability metadata to DAG
+        dag.getMetadata().put("explainabilityEnabled", "true");
+        dag.getMetadata().put("causalTrackingEnabled", "true");
+        
+        return dag;
+    }
+
+    @Override
+    protected void initializeIntegrationTestData() {
+        System.out.println("Initializing CADR and Explainability integration test data...");
+    }
+
+    @Override
+    protected void cleanupIntegrationTestData() {
+        System.out.println("Cleaning up CADR and Explainability integration test data...");
+    }
+}

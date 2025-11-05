@@ -1,0 +1,740 @@
+package api.integration;
+
+import api.ObvianApiApplication;
+import api.config.BaseSpringIntegrationTest;
+import api.service.VisualTraceService;
+import api.websocket.ExecutionWebSocketHandler;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import core.*;
+import core.explainability.*;
+import memory.MemoryStore;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.messaging.converter.MappingJackson2MessageConverter;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.messaging.simp.stomp.*;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.web.socket.*;
+import org.springframework.web.socket.client.standard.StandardWebSocketClient;
+
+import java.lang.reflect.Type;
+import java.net.URI;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Comprehensive WebSocket integration tests for Visual Trace Logging system.
+ * 
+ * Tests real-time WebSocket streaming during DAG execution including:
+ * - WebSocket connection establishment and management
+ * - Real-time execution updates and timeline streaming
+ * - Concurrent WebSocket connections and session management
+ * - Playback control via WebSocket messages
+ * - Performance under high-frequency updates
+ * - Error handling and connection recovery
+ * - Security and authentication integration
+ * 
+ * Test Categories:
+ * - WebSocket connection lifecycle
+ * - Real-time execution streaming
+ * - Concurrent connection handling
+ * - Playback control integration
+ * - Performance and scalability
+ * - Error scenarios and recovery
+ * - Security integration
+ */
+@SpringBootTest(
+    classes = {ObvianApiApplication.class},
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
+@ActiveProfiles("integration-test")
+@TestPropertySource(properties = {
+    "spring.main.allow-bean-definition-overriding=true",
+    "logging.level.api.websocket=DEBUG",
+    "obvian.websocket.enabled=true",
+    "obvian.websocket.max-connections=100",
+    "obvian.visual-trace.realtime.enabled=true"
+})
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class VisualTraceWebSocketIntegrationTest extends BaseSpringIntegrationTest {
+
+    @LocalServerPort
+    private int port;
+
+    @Autowired
+    private DagExecutor dagExecutor;
+
+    @Autowired
+    private VisualTraceService visualTraceService;
+
+    @Autowired
+    private ExplainabilityService explainabilityService;
+
+    @Autowired
+    private MemoryStore memoryStore;
+
+    @Autowired
+    private SimpMessagingTemplate messagingTemplate;
+
+    @Autowired
+    private ExecutionWebSocketHandler webSocketHandler;
+
+    private StandardWebSocketClient webSocketClient;
+    private ObjectMapper objectMapper;
+    private String webSocketUrl;
+    private String stompUrl;
+
+    @BeforeEach
+    @Override
+    protected void setUp() {
+        super.setUp();
+        webSocketClient = new StandardWebSocketClient();
+        objectMapper = new ObjectMapper();
+        webSocketUrl = "ws://localhost:" + port + "/execution-websocket";
+        stompUrl = "ws://localhost:" + port + "/stomp";
+        
+        // Clear any existing data
+        memoryStore.clearMemory();
+    }
+
+    @AfterEach
+    @Override
+    protected void tearDown() {
+        super.tearDown();
+        memoryStore.clearMemory();
+    }
+
+    // ===== WebSocket Connection Lifecycle Tests =====
+
+    @Test
+    @Order(1)
+    @DisplayName("WebSocket: Connection establishment and basic messaging")
+    void testWebSocketConnectionEstablishmentAndBasicMessaging() throws Exception {
+        // Given
+        CountDownLatch connectionLatch = new CountDownLatch(1);
+        CountDownLatch messageLatch = new CountDownLatch(1);
+        AtomicReference<String> receivedMessage = new AtomicReference<>();
+        
+        WebSocketHandler handler = new WebSocketHandler() {
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                connectionLatch.countDown();
+                
+                // Send a test message
+                Map<String, Object> testMessage = Map.of(
+                    "type", "test_message",
+                    "data", "hello_websocket"
+                );
+                session.sendMessage(new TextMessage(objectMapper.writeValueAsString(testMessage)));
+            }
+
+            @Override
+            public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                receivedMessage.set(message.getPayload().toString());
+                messageLatch.countDown();
+            }
+
+            @Override
+            public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                fail("WebSocket transport error: " + exception.getMessage());
+            }
+
+            @Override
+            public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                // Connection closed
+            }
+
+            @Override
+            public boolean supportsPartialMessages() {
+                return false;
+            }
+        };
+
+        // When - Establish WebSocket connection
+        WebSocketSession session = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl)).get(5, TimeUnit.SECONDS);
+
+        // Then - Verify connection established
+        assertTrue(connectionLatch.await(5, TimeUnit.SECONDS), "WebSocket connection should be established");
+        assertThat(session.isOpen()).isTrue();
+
+        // And - Verify message exchange
+        assertTrue(messageLatch.await(5, TimeUnit.SECONDS), "Should receive response message");
+        assertThat(receivedMessage.get()).isNotNull();
+
+        Map<String, Object> response = objectMapper.readValue(receivedMessage.get(), Map.class);
+        assertThat(response.get("type")).isEqualTo("connection_opened");
+        assertThat(response.get("sessionId")).isNotNull();
+
+        // Cleanup
+        session.close();
+        
+        System.out.println("✓ WebSocket connection established and basic messaging verified");
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("WebSocket: Real-time execution updates during DAG execution")
+    void testRealTimeExecutionUpdatesDuringDAGExecution() throws Exception {
+        // Given
+        String executionId = "websocket-exec-" + System.currentTimeMillis();
+        CountDownLatch connectionLatch = new CountDownLatch(1);
+        CountDownLatch executionStartLatch = new CountDownLatch(1);
+        CountDownLatch executionCompleteLatch = new CountDownLatch(1);
+        List<Map<String, Object>> receivedUpdates = new CopyOnWriteArrayList<>();
+
+        WebSocketHandler handler = new WebSocketHandler() {
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                connectionLatch.countDown();
+            }
+
+            @Override
+            public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                Map<String, Object> update = objectMapper.readValue(message.getPayload().toString(), Map.class);
+                receivedUpdates.add(update);
+                
+                String type = (String) update.get("type");
+                if ("execution_started".equals(type)) {
+                    executionStartLatch.countDown();
+                } else if ("execution_completed".equals(type)) {
+                    executionCompleteLatch.countDown();
+                }
+            }
+
+            @Override
+            public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                System.err.println("WebSocket error: " + exception.getMessage());
+            }
+
+            @Override
+            public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                // Connection closed
+            }
+
+            @Override
+            public boolean supportsPartialMessages() {
+                return false;
+            }
+        };
+
+        // When - Establish connection and execute DAG
+        WebSocketSession session = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl)).get(5, TimeUnit.SECONDS);
+        assertTrue(connectionLatch.await(5, TimeUnit.SECONDS), "WebSocket connection should be established");
+
+        // Execute DAG with WebSocket notifications
+        List<TaskNode> nodes = createTestNodes();
+        Dag dag = createTestDAG(nodes);
+        ExecutionContext context = new ExecutionContext();
+        context.setExecutionId(executionId);
+        context.setUserId("websocket-test-user");
+
+        // Simulate WebSocket notifications during execution
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Simulate execution start notification
+                webSocketHandler.broadcastExecutionUpdate("execution_started", executionId, 
+                    Map.of("nodeCount", nodes.size(), "startTime", System.currentTimeMillis()));
+                
+                Thread.sleep(100); // Simulate execution time
+                
+                // Simulate execution complete notification
+                webSocketHandler.broadcastExecutionUpdate("execution_completed", executionId,
+                    Map.of("status", "COMPLETED", "endTime", System.currentTimeMillis()));
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+
+        // Then - Verify real-time updates received
+        assertTrue(executionStartLatch.await(5, TimeUnit.SECONDS), "Should receive execution start notification");
+        assertTrue(executionCompleteLatch.await(5, TimeUnit.SECONDS), "Should receive execution complete notification");
+
+        assertThat(receivedUpdates).hasSizeGreaterThanOrEqualTo(2);
+        
+        // Verify execution start update
+        Optional<Map<String, Object>> startUpdate = receivedUpdates.stream()
+            .filter(update -> "execution_started".equals(update.get("type")))
+            .findFirst();
+        assertThat(startUpdate).isPresent();
+        assertThat(startUpdate.get().get("executionId")).isEqualTo(executionId);
+
+        // Verify execution complete update
+        Optional<Map<String, Object>> completeUpdate = receivedUpdates.stream()
+            .filter(update -> "execution_completed".equals(update.get("type")))
+            .findFirst();
+        assertThat(completeUpdate).isPresent();
+        assertThat(completeUpdate.get().get("executionId")).isEqualTo(executionId);
+
+        // Cleanup
+        session.close();
+        
+        System.out.println("✓ Received " + receivedUpdates.size() + " real-time execution updates");
+        System.out.println("✓ WebSocket real-time updates during DAG execution verified");
+    }
+
+    @Test
+    @Order(3)
+    @DisplayName("WebSocket: Concurrent connections and session management")
+    void testConcurrentConnectionsAndSessionManagement() throws Exception {
+        // Given - Multiple concurrent WebSocket connections
+        int connectionCount = 5;
+        CountDownLatch allConnectionsLatch = new CountDownLatch(connectionCount);
+        CountDownLatch allMessagesLatch = new CountDownLatch(connectionCount);
+        List<WebSocketSession> sessions = new CopyOnWriteArrayList<>();
+        AtomicInteger messageCount = new AtomicInteger(0);
+
+        // Create multiple WebSocket handlers
+        List<WebSocketHandler> handlers = new ArrayList<>();
+        for (int i = 0; i < connectionCount; i++) {
+            final int connectionIndex = i;
+            handlers.add(new WebSocketHandler() {
+                @Override
+                public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                    sessions.add(session);
+                    allConnectionsLatch.countDown();
+                    System.out.println("Connection " + connectionIndex + " established: " + session.getId());
+                }
+
+                @Override
+                public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                    messageCount.incrementAndGet();
+                    allMessagesLatch.countDown();
+                }
+
+                @Override
+                public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                    System.err.println("Connection " + connectionIndex + " error: " + exception.getMessage());
+                }
+
+                @Override
+                public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                    System.out.println("Connection " + connectionIndex + " closed");
+                }
+
+                @Override
+                public boolean supportsPartialMessages() {
+                    return false;
+                }
+            });
+        }
+
+        // When - Establish multiple concurrent connections
+        List<CompletableFuture<WebSocketSession>> connectionFutures = new ArrayList<>();
+        for (WebSocketHandler handler : handlers) {
+            CompletableFuture<WebSocketSession> future = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl));
+            connectionFutures.add(future);
+        }
+
+        // Wait for all connections to establish
+        CompletableFuture.allOf(connectionFutures.toArray(new CompletableFuture[0])).get(10, TimeUnit.SECONDS);
+        assertTrue(allConnectionsLatch.await(10, TimeUnit.SECONDS), "All connections should be established");
+
+        // Then - Verify all connections are active
+        assertThat(sessions).hasSize(connectionCount);
+        for (WebSocketSession session : sessions) {
+            assertThat(session.isOpen()).isTrue();
+        }
+
+        // Test broadcasting to all connections
+        String testExecutionId = "concurrent-test-" + System.currentTimeMillis();
+        webSocketHandler.broadcastExecutionUpdate("test_broadcast", testExecutionId, 
+            Map.of("connectionCount", connectionCount));
+
+        // Verify all connections receive the broadcast
+        assertTrue(allMessagesLatch.await(10, TimeUnit.SECONDS), "All connections should receive broadcast message");
+        assertThat(messageCount.get()).isGreaterThanOrEqualTo(connectionCount);
+
+        // Test concurrent playback control
+        String playbackExecutionId = "playback-concurrent-" + System.currentTimeMillis();
+        List<CompletableFuture<Void>> playbackFutures = new ArrayList<>();
+        
+        for (int i = 0; i < 3; i++) {
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                try {
+                    visualTraceService.controlPlayback(playbackExecutionId, VisualTraceService.PlaybackCommand.PLAY);
+                } catch (Exception e) {
+                    // Expected for non-existent execution
+                }
+            });
+            playbackFutures.add(future);
+        }
+
+        // Wait for all playback commands to complete
+        CompletableFuture.allOf(playbackFutures.toArray(new CompletableFuture[0])).get(5, TimeUnit.SECONDS);
+
+        // Cleanup all connections
+        for (WebSocketSession session : sessions) {
+            if (session.isOpen()) {
+                session.close();
+            }
+        }
+
+        System.out.println("✓ " + connectionCount + " concurrent WebSocket connections managed successfully");
+        System.out.println("✓ Broadcast message received " + messageCount.get() + " times across connections");
+    }
+
+    @Test
+    @Order(4)
+    @DisplayName("WebSocket: Playback control integration with real-time updates")
+    void testPlaybackControlIntegrationWithRealTimeUpdates() throws Exception {
+        // Given - Execute a DAG to have trace data
+        String executionId = "playback-test-" + System.currentTimeMillis();
+        List<TaskNode> nodes = createTestNodes();
+        Dag dag = createTestDAG(nodes);
+        ExecutionContext context = new ExecutionContext();
+        context.setExecutionId(executionId);
+        context.setUserId("playback-test-user");
+
+        dagExecutor.executeDag(dag, context);
+        
+        // Set up WebSocket connection for playback events
+        CountDownLatch connectionLatch = new CountDownLatch(1);
+        CountDownLatch playbackStartLatch = new CountDownLatch(1);
+        CountDownLatch playbackStopLatch = new CountDownLatch(1);
+        List<Map<String, Object>> playbackEvents = new CopyOnWriteArrayList<>();
+
+        WebSocketHandler handler = new WebSocketHandler() {
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                connectionLatch.countDown();
+            }
+
+            @Override
+            public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                Map<String, Object> event = objectMapper.readValue(message.getPayload().toString(), Map.class);
+                playbackEvents.add(event);
+                
+                String type = (String) event.get("type");
+                if ("playback_started".equals(type)) {
+                    playbackStartLatch.countDown();
+                } else if ("playback_stopped".equals(type)) {
+                    playbackStopLatch.countDown();
+                }
+            }
+
+            @Override
+            public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                System.err.println("Playback WebSocket error: " + exception.getMessage());
+            }
+
+            @Override
+            public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                // Connection closed
+            }
+
+            @Override
+            public boolean supportsPartialMessages() {
+                return false;
+            }
+        };
+
+        // When - Establish connection and control playback
+        WebSocketSession session = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl)).get(5, TimeUnit.SECONDS);
+        assertTrue(connectionLatch.await(5, TimeUnit.SECONDS), "WebSocket connection should be established");
+
+        // Simulate playback events
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Simulate playback start
+                webSocketHandler.broadcastExecutionUpdate("playback_started", executionId,
+                    Map.of("speed", 1.0, "currentStep", 0));
+                
+                Thread.sleep(100);
+                
+                // Simulate playback step events
+                for (int i = 1; i <= 3; i++) {
+                    webSocketHandler.broadcastExecutionUpdate("playback_step", executionId,
+                        Map.of("step", i, "nodeId", "node-" + i));
+                    Thread.sleep(50);
+                }
+                
+                // Simulate playback stop
+                webSocketHandler.broadcastExecutionUpdate("playback_stopped", executionId,
+                    Map.of("finalStep", 3, "reason", "completed"));
+                
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+
+        // Then - Verify playback events received
+        assertTrue(playbackStartLatch.await(5, TimeUnit.SECONDS), "Should receive playback start event");
+        assertTrue(playbackStopLatch.await(5, TimeUnit.SECONDS), "Should receive playback stop event");
+
+        assertThat(playbackEvents).hasSizeGreaterThanOrEqualTo(5); // start + 3 steps + stop
+
+        // Verify playback event structure
+        Optional<Map<String, Object>> startEvent = playbackEvents.stream()
+            .filter(event -> "playback_started".equals(event.get("type")))
+            .findFirst();
+        assertThat(startEvent).isPresent();
+        assertThat(startEvent.get().get("executionId")).isEqualTo(executionId);
+
+        // Verify step events
+        long stepEvents = playbackEvents.stream()
+            .filter(event -> "playback_step".equals(event.get("type")))
+            .count();
+        assertThat(stepEvents).isEqualTo(3);
+
+        // Cleanup
+        session.close();
+        
+        System.out.println("✓ Received " + playbackEvents.size() + " playback events via WebSocket");
+        System.out.println("✓ Playback control integration with real-time updates verified");
+    }
+
+    @Test
+    @Order(5)
+    @DisplayName("WebSocket: Performance under high-frequency updates")
+    void testPerformanceUnderHighFrequencyUpdates() throws Exception {
+        // Given - High-frequency update scenario
+        int updateCount = 100;
+        CountDownLatch connectionLatch = new CountDownLatch(1);
+        CountDownLatch allUpdatesLatch = new CountDownLatch(updateCount);
+        AtomicInteger receivedCount = new AtomicInteger(0);
+        List<Long> updateTimestamps = new CopyOnWriteArrayList<>();
+
+        WebSocketHandler handler = new WebSocketHandler() {
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                connectionLatch.countDown();
+            }
+
+            @Override
+            public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                updateTimestamps.add(System.currentTimeMillis());
+                receivedCount.incrementAndGet();
+                allUpdatesLatch.countDown();
+            }
+
+            @Override
+            public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                System.err.println("High-frequency test WebSocket error: " + exception.getMessage());
+            }
+
+            @Override
+            public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                // Connection closed
+            }
+
+            @Override
+            public boolean supportsPartialMessages() {
+                return false;
+            }
+        };
+
+        // When - Establish connection and send high-frequency updates
+        WebSocketSession session = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl)).get(5, TimeUnit.SECONDS);
+        assertTrue(connectionLatch.await(5, TimeUnit.SECONDS), "WebSocket connection should be established");
+
+        String executionId = "high-freq-test-" + System.currentTimeMillis();
+        long startTime = System.currentTimeMillis();
+
+        // Send high-frequency updates
+        CompletableFuture.runAsync(() -> {
+            for (int i = 0; i < updateCount; i++) {
+                webSocketHandler.broadcastExecutionUpdate("high_freq_update", executionId,
+                    Map.of("updateIndex", i, "timestamp", System.currentTimeMillis()));
+                
+                try {
+                    Thread.sleep(10); // 10ms between updates (100 updates/second)
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        });
+
+        // Then - Verify performance under high-frequency updates
+        assertTrue(allUpdatesLatch.await(15, TimeUnit.SECONDS), "Should receive all high-frequency updates");
+        long endTime = System.currentTimeMillis();
+        long totalTime = endTime - startTime;
+
+        assertThat(receivedCount.get()).isGreaterThanOrEqualTo(updateCount);
+        assertThat(totalTime).as("High-frequency updates should complete within reasonable time")
+            .isLessThan(5000); // 5 seconds max
+
+        // Calculate performance metrics
+        if (updateTimestamps.size() >= 2) {
+            long firstUpdate = updateTimestamps.get(0);
+            long lastUpdate = updateTimestamps.get(updateTimestamps.size() - 1);
+            long updateDuration = lastUpdate - firstUpdate;
+            double updatesPerSecond = (double) updateTimestamps.size() / (updateDuration / 1000.0);
+            
+            assertThat(updatesPerSecond).as("Should handle high-frequency updates efficiently")
+                .isGreaterThan(50); // At least 50 updates/second
+            
+            System.out.println("✓ Processed " + updatesPerSecond + " updates/second");
+        }
+
+        // Cleanup
+        session.close();
+        
+        System.out.println("✓ High-frequency performance test completed successfully");
+        System.out.println("✓ Received " + receivedCount.get() + " updates in " + totalTime + "ms");
+    }
+
+    @Test
+    @Order(6)
+    @DisplayName("WebSocket: Error handling and connection recovery")
+    void testErrorHandlingAndConnectionRecovery() throws Exception {
+        // Test Case 1: Connection timeout handling
+        {
+            CountDownLatch connectionLatch = new CountDownLatch(1);
+            CountDownLatch errorLatch = new CountDownLatch(1);
+            AtomicReference<Throwable> connectionError = new AtomicReference<>();
+
+            WebSocketHandler handler = new WebSocketHandler() {
+                @Override
+                public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                    connectionLatch.countDown();
+                    // Immediately close to simulate connection failure
+                    session.close();
+                }
+
+                @Override
+                public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                    // Should not receive messages after connection closes
+                }
+
+                @Override
+                public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                    connectionError.set(exception);
+                    errorLatch.countDown();
+                }
+
+                @Override
+                public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                    System.out.println("Connection closed with status: " + closeStatus);
+                }
+
+                @Override
+                public boolean supportsPartialMessages() {
+                    return false;
+                }
+            };
+
+            // Attempt connection
+            WebSocketSession session = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl)).get(5, TimeUnit.SECONDS);
+            assertTrue(connectionLatch.await(5, TimeUnit.SECONDS), "Connection should be established");
+            
+            // Wait for connection to close
+            Thread.sleep(100);
+            assertThat(session.isOpen()).isFalse();
+            
+            System.out.println("✓ Connection timeout and closure handled correctly");
+        }
+
+        // Test Case 2: Invalid message handling
+        {
+            CountDownLatch connectionLatch = new CountDownLatch(1);
+            CountDownLatch messageLatch = new CountDownLatch(1);
+            AtomicReference<String> receivedResponse = new AtomicReference<>();
+
+            WebSocketHandler handler = new WebSocketHandler() {
+                @Override
+                public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                    connectionLatch.countDown();
+                    
+                    // Send invalid JSON message
+                    session.sendMessage(new TextMessage("{invalid json"));
+                }
+
+                @Override
+                public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
+                    receivedResponse.set(message.getPayload().toString());
+                    messageLatch.countDown();
+                }
+
+                @Override
+                public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                    System.err.println("Expected error for invalid message: " + exception.getMessage());
+                }
+
+                @Override
+                public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                    // Connection closed
+                }
+
+                @Override
+                public boolean supportsPartialMessages() {
+                    return false;
+                }
+            };
+
+            WebSocketSession session = webSocketClient.doHandshake(handler, null, URI.create(webSocketUrl)).get(5, TimeUnit.SECONDS);
+            assertTrue(connectionLatch.await(5, TimeUnit.SECONDS), "Connection should be established");
+
+            // Should still receive initial connection message despite invalid message
+            assertTrue(messageLatch.await(5, TimeUnit.SECONDS), "Should receive connection response");
+            assertThat(receivedResponse.get()).contains("connection_opened");
+
+            session.close();
+            System.out.println("✓ Invalid message handling verified");
+        }
+
+        // Test Case 3: Recovery after handler failure
+        {
+            String executionId = "recovery-test-" + System.currentTimeMillis();
+            
+            // Simulate handler failure and recovery
+            try {
+                webSocketHandler.broadcastExecutionUpdate("test_after_failure", executionId,
+                    Map.of("recovery", true));
+                // Should not throw exception even if no active connections
+            } catch (Exception e) {
+                fail("Handler should handle missing connections gracefully: " + e.getMessage());
+            }
+            
+            System.out.println("✓ Handler recovery after failure verified");
+        }
+    }
+
+    // ===== Helper Methods =====
+
+    private List<TaskNode> createTestNodes() {
+        List<TaskNode> nodes = new ArrayList<>();
+        
+        TaskNode node1 = new TaskNode("ws-node-1", "websocket-action-1");
+        node1.setInputParams(Map.of("test", "websocket", "index", 1));
+        nodes.add(node1);
+        
+        TaskNode node2 = new TaskNode("ws-node-2", "websocket-action-2");
+        node2.setInputParams(Map.of("test", "websocket", "index", 2));
+        node2.addDependency("ws-node-1");
+        nodes.add(node2);
+        
+        TaskNode node3 = new TaskNode("ws-node-3", "websocket-action-3");
+        node3.setInputParams(Map.of("test", "websocket", "index", 3));
+        node3.addDependency("ws-node-2");
+        nodes.add(node3);
+        
+        return nodes;
+    }
+
+    private Dag createTestDAG(List<TaskNode> nodes) {
+        Dag dag = new Dag("websocket-test-dag-" + System.currentTimeMillis());
+        nodes.forEach(dag::addNode);
+        return dag;
+    }
+
+    @Override
+    protected void initializeIntegrationTestData() {
+        System.out.println("Initializing WebSocket integration test data...");
+    }
+
+    @Override
+    protected void cleanupIntegrationTestData() {
+        System.out.println("Cleaning up WebSocket integration test data...");
+    }
+}

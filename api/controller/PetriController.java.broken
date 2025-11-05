@@ -1,0 +1,789 @@
+package api.controller;
+
+import api.dto.*;
+import api.monitoring.CircuitBreakerManager;
+import api.monitoring.P3NetMetricsCollector;
+import api.monitoring.P3NetRecoveryService;
+import core.PromptParser;
+import core.petri.PetriIntentSpec;
+import core.petri.PetriNet;
+import core.petri.PetriNetValidationResult;
+import core.petri.grammar.AutomationGrammar;
+import core.petri.simulation.PetriTokenSimulator;
+import core.petri.simulation.SimulationConfig;
+import core.petri.simulation.SimulationResult;
+import core.petri.validation.PetriNetValidator;
+import io.micrometer.core.instrument.Timer;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.*;
+
+/**
+ * REST controller for Petri net workflow processing endpoints.
+ *
+ * Provides comprehensive API for natural language parsing, Petri net construction,
+ * formal validation, simulation, and DAG projection.
+ *
+ * @author Obvian Labs
+ */
+@RestController
+@RequestMapping("/api/v1/petri")
+@Tag(name = "Petri Net Workflows", description = "Petri net workflow processing endpoints")
+public class PetriController {
+
+    private static final Logger logger = LoggerFactory.getLogger(PetriController.class);
+    private static final String SCHEMA_VERSION = "1.0";
+
+    private final PromptParser promptParser;
+    private final AutomationGrammar automationGrammar;
+    private final PetriNetValidator petriNetValidator;
+    private final PetriTokenSimulator petriTokenSimulator;
+
+    @Autowired
+    private P3NetMetricsCollector metricsCollector;
+
+    @Autowired
+    private CircuitBreakerManager circuitBreakerManager;
+
+    @Autowired
+    private P3NetRecoveryService recoveryService;
+
+    public PetriController(AutomationGrammar automationGrammar,
+                          PetriNetValidator petriNetValidator,
+                          PetriTokenSimulator petriTokenSimulator) {
+        this.promptParser = new PromptParser();
+        this.automationGrammar = automationGrammar;
+        this.petriNetValidator = petriNetValidator;
+        this.petriTokenSimulator = petriTokenSimulator;
+    }
+
+    /**
+     * Parse natural language into PetriIntentSpec
+     * POST /api/v1/petri/parse
+     */
+    @PostMapping("/parse")
+    @Operation(summary = "Parse natural language into Petri intent specification",
+               description = "Converts natural language workflow descriptions into structured intent specifications")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Successfully parsed input"),
+        @ApiResponse(responseCode = "400", description = "Invalid input or unrecognized pattern"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    public ResponseEntity<?> parseNaturalLanguage(
+            @Parameter(description = "Natural language parsing request", required = true)
+            @Valid @RequestBody PetriParseRequest request) {
+
+        logger.info("Parsing natural language: {}", request.getText().substring(0, Math.min(request.getText().length(), 100)));
+
+        // Start monitoring metrics
+        Timer.Sample sample = metricsCollector.startParseTimer();
+        String operationId = "parse_" + System.currentTimeMillis();
+
+        try {
+            // Execute with circuit breaker protection
+            return circuitBreakerManager.executeWithCircuitBreaker(
+                CircuitBreakerManager.PARSER_CB,
+                () -> {
+                    // Parse natural language using real PromptParser
+                    PromptParser.CompoundParseResult parseResult = promptParser.parseCompoundPrompt(request.getText());
+                    List<PromptParser.ParsedIntent> intents = parseResult.getIntents();
+
+            // Convert parsed intents to PetriIntentSpec
+            PetriIntentSpec.Builder intentBuilder = PetriIntentSpec.builder()
+                    .name("ParsedWorkflow")
+                    .description("Workflow parsed from: " + request.getText())
+                    .originalPrompt(request.getText())
+                    .templateId(request.getTemplateHint() != null ? request.getTemplateHint() : "generic-workflow");
+
+            // Convert parsed intents to intent steps
+            int stepCounter = 1;
+            String previousStepId = null;
+
+            for (PromptParser.ParsedIntent intent : intents) {
+                String stepId = "step" + stepCounter++;
+                String description = getDescriptionForAction(intent.getAction(), intent.getParameters());
+
+                PetriIntentSpec.IntentStep step = new PetriIntentSpec.IntentStep(
+                    stepId,
+                    PetriIntentSpec.StepType.ACTION,
+                    description,
+                    previousStepId != null ? Arrays.asList(previousStepId) : new ArrayList<>(),
+                    new HashMap<>(),
+                    null,
+                    new HashMap<>(intent.getParameters())
+                );
+
+                intentBuilder.addStep(step);
+                previousStepId = stepId;
+            }
+
+            PetriIntentSpec intentSpec = intentBuilder.build();
+
+            // Convert to response format
+            Map<String, Object> intentMap = convertIntentSpecToMap(intentSpec);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("schemaVersion", SCHEMA_VERSION);
+            response.put("intent", intentMap);
+            response.put("templateUsed", intentSpec.getTemplateId());
+            response.put("confidence", calculateConfidence(parseResult));
+            response.put("success", true);
+
+            logger.info("Successfully parsed input into {} intents", intents.size());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error during parsing", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("schemaVersion", SCHEMA_VERSION);
+            errorResponse.put("error", Map.of(
+                "code", "PARSE_ERROR",
+                "message", "Failed to parse natural language: " + e.getMessage()
+            ));
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    /**
+     * Build Petri net from intent specification
+     * POST /api/v1/petri/build
+     */
+    @PostMapping("/build")
+    @Operation(summary = "Build Petri net from intent specification",
+               description = "Converts structured intent specifications into formal Petri net representations")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Successfully built Petri net"),
+        @ApiResponse(responseCode = "400", description = "Invalid intent specification"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    public ResponseEntity<?> buildPetriNet(
+            @Parameter(description = "Petri net build request", required = true)
+            @Valid @RequestBody PetriBuildRequest request) {
+
+        logger.info("Building Petri net from intent: {}", request.getIntent().getName());
+
+        try {
+            // Convert request intent to PetriIntentSpec
+            PetriIntentSpec intentSpec = convertMapToIntentSpec(request.getIntent());
+
+            // Use AutomationGrammar to transform intent to PetriNet
+            PetriNet petriNet = automationGrammar.transform(intentSpec);
+
+            // Convert PetriNet to response format
+            Map<String, Object> petriNetMap = convertPetriNetToMap(petriNet);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("schemaVersion", SCHEMA_VERSION);
+            response.put("petriNet", petriNetMap);
+            response.put("success", true);
+
+            logger.info("Successfully built Petri net with {} places, {} transitions, {} arcs",
+                    petriNet.getPlaces().size(), petriNet.getTransitions().size(), petriNet.getArcs().size());
+            return ResponseEntity.ok(response);
+
+        } catch (AutomationGrammar.GrammarTransformationException e) {
+            logger.error("AutomationGrammar transformation failed", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("schemaVersion", SCHEMA_VERSION);
+            errorResponse.put("error", Map.of(
+                "code", "TRANSFORMATION_ERROR",
+                "message", "Failed to transform intent to Petri net: " + e.getMessage()
+            ));
+            return ResponseEntity.badRequest().body(errorResponse);
+        } catch (Exception e) {
+            logger.error("Error during Petri net construction", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("schemaVersion", SCHEMA_VERSION);
+            errorResponse.put("error", Map.of(
+                "code", "BUILD_ERROR",
+                "message", "Failed to build Petri net: " + e.getMessage()
+            ));
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    /**
+     * Validate Petri net using formal methods
+     * POST /api/v1/petri/validate
+     */
+    @PostMapping("/validate")
+    @Operation(summary = "Validate Petri net using formal methods",
+               description = "Performs comprehensive validation including deadlock detection and reachability analysis")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Validation completed"),
+        @ApiResponse(responseCode = "400", description = "Invalid Petri net structure"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    public ResponseEntity<?> validatePetriNet(
+            @Parameter(description = "Petri net validation request", required = true)
+            @Valid @RequestBody PetriValidateRequest request) {
+
+        logger.info("Validating Petri net: {}", request.getPetriNet().getId());
+
+        try {
+            // Create validation configuration from request
+            PetriNetValidationResult.ValidationConfig config = createValidationConfig(request.getConfig());
+
+            // Perform real validation using PetriNetValidator
+            PetriNetValidationResult validationResult = petriNetValidator.validate(request.getPetriNet(), config);
+
+            // Convert result to response format
+            Map<String, Object> report = convertValidationResultToMap(validationResult);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("schemaVersion", SCHEMA_VERSION);
+            response.put("report", report);
+            response.put("success", validationResult.isValid());
+
+            logger.info("Validation completed: {} ({} states explored)",
+                    validationResult.getPetriStatus(), validationResult.getStatesExplored());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error during validation", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("schemaVersion", SCHEMA_VERSION);
+            errorResponse.put("error", Map.of(
+                "code", "VALIDATION_ERROR",
+                "message", "Failed to validate Petri net: " + e.getMessage()
+            ));
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    /**
+     * Simulate Petri net execution
+     * POST /api/v1/petri/simulate
+     */
+    @PostMapping("/simulate")
+    @Operation(summary = "Simulate Petri net execution",
+               description = "Executes Petri net with token animation and trace logging")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Simulation completed successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid Petri net or simulation configuration"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    public ResponseEntity<?> simulatePetriNet(
+            @Parameter(description = "Petri net simulation request", required = true)
+            @Valid @RequestBody PetriSimulateRequest request) {
+
+        logger.info("Simulating Petri net: {}", request.getPetriNet().getId());
+
+        try {
+            // Create simulation configuration from request
+            SimulationConfig config = createSimulationConfig(request.getConfig());
+
+            // Perform real simulation using PetriTokenSimulator
+            SimulationResult simulationResult = petriTokenSimulator.simulate(request.getPetriNet(), config);
+
+            // Convert result to response format
+            Map<String, Object> response = convertSimulationResultToMap(simulationResult);
+            response.put("schemaVersion", SCHEMA_VERSION);
+            response.put("success", simulationResult.isSuccessful());
+
+            logger.info("Simulation completed: {} ({} steps in {}ms)",
+                    simulationResult.getStatus(), simulationResult.getStepsExecuted(),
+                    simulationResult.getExecutionTimeMs());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error during simulation", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("schemaVersion", SCHEMA_VERSION);
+            errorResponse.put("error", Map.of(
+                "code", "SIMULATION_ERROR",
+                "message", "Failed to simulate Petri net: " + e.getMessage()
+            ));
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    /**
+     * Project Petri net to DAG representation
+     * POST /api/v1/petri/dag
+     */
+    @PostMapping("/dag")
+    @Operation(summary = "Project Petri net to DAG representation",
+               description = "Generates DAG representation from validated Petri net")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Successfully generated DAG representation"),
+        @ApiResponse(responseCode = "400", description = "Invalid Petri net structure"),
+        @ApiResponse(responseCode = "500", description = "Internal server error")
+    })
+    public ResponseEntity<?> projectToDAG(
+            @Parameter(description = "DAG projection request", required = true)
+            @Valid @RequestBody PetriDagRequest request) {
+
+        logger.info("Projecting Petri net to DAG: {}", request.getPetriNet().getId());
+
+        try {
+            // TODO: PetriToDagProjector is not yet available - implement placeholder
+            logger.warn("PetriToDagProjector not yet implemented - returning mock response");
+
+            // Generate basic DAG from Petri net structure as placeholder
+            Map<String, Object> dag = generateBasicDagFromPetriNet(request.getPetriNet());
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("schemaVersion", SCHEMA_VERSION);
+            response.put("dag", dag);
+            response.put("derivedFromPetriNetId", request.getPetriNet().getId());
+            response.put("success", true);
+            response.put("warning", "PetriToDagProjector not yet implemented - using basic projection");
+
+            logger.info("Generated basic DAG projection for Petri net: {}", request.getPetriNet().getId());
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error during DAG projection", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("schemaVersion", SCHEMA_VERSION);
+            errorResponse.put("error", Map.of(
+                "code", "DAG_PROJECTION_ERROR",
+                "message", "Failed to project Petri net to DAG: " + e.getMessage()
+            ));
+            return ResponseEntity.badRequest().body(errorResponse);
+        }
+    }
+
+    /**
+     * Health check for Petri net service
+     * GET /api/v1/petri/health
+     */
+    @GetMapping("/health")
+    @Operation(summary = "Health check for Petri net service",
+               description = "Returns health status of all Petri net processing components")
+    @ApiResponse(responseCode = "200", description = "Service is healthy")
+    public ResponseEntity<Map<String, Object>> health() {
+        Map<String, Object> health = new HashMap<>();
+        health.put("status", "healthy");
+        health.put("service", "PetriNetService");
+        health.put("timestamp", System.currentTimeMillis());
+        health.put("schemaVersion", SCHEMA_VERSION);
+
+        Map<String, String> components = new HashMap<>();
+
+        // Check PromptParser
+        try {
+            promptParser.parsePrompt("test");
+            components.put("promptParser", "healthy");
+        } catch (Exception e) {
+            components.put("promptParser", "unhealthy: " + e.getMessage());
+        }
+
+        // Check AutomationGrammar
+        try {
+            if (automationGrammar != null) {
+                components.put("automationGrammar", "healthy");
+            } else {
+                components.put("automationGrammar", "not_initialized");
+            }
+        } catch (Exception e) {
+            components.put("automationGrammar", "unhealthy: " + e.getMessage());
+        }
+
+        // Check PetriNetValidator
+        try {
+            if (petriNetValidator != null) {
+                components.put("petriNetValidator", "healthy");
+            } else {
+                components.put("petriNetValidator", "not_initialized");
+            }
+        } catch (Exception e) {
+            components.put("petriNetValidator", "unhealthy: " + e.getMessage());
+        }
+
+        // Check PetriTokenSimulator
+        try {
+            if (petriTokenSimulator != null) {
+                components.put("petriTokenSimulator", "healthy");
+            } else {
+                components.put("petriTokenSimulator", "not_initialized");
+            }
+        } catch (Exception e) {
+            components.put("petriTokenSimulator", "unhealthy: " + e.getMessage());
+        }
+
+        // Note about missing components
+        components.put("petriToDagProjector", "not_yet_implemented");
+
+        health.put("components", components);
+
+        // Overall health status
+        boolean allHealthy = components.values().stream()
+                .allMatch(status -> "healthy".equals(status) || "not_yet_implemented".equals(status));
+        if (!allHealthy) {
+            health.put("status", "degraded");
+        }
+
+        return ResponseEntity.ok(health);
+    }
+
+    // Helper methods for real processing
+
+    /**
+     * Convert parsed action and parameters to human-readable description
+     */
+    private String getDescriptionForAction(String action, Map<String, Object> parameters) {
+        switch (action) {
+            case "send_email":
+                return "Send email to " + parameters.getOrDefault("recipient", "unknown");
+            case "create_file":
+                return "Create file " + parameters.getOrDefault("filename", "untitled");
+            case "set_reminder":
+                return "Set reminder: " + parameters.getOrDefault("task", "reminder");
+            case "generic":
+                return parameters.getOrDefault("message", "Generic action").toString();
+            default:
+                return "Execute " + action;
+        }
+    }
+
+    /**
+     * Convert PetriIntentSpec to Map for JSON response
+     */
+    private Map<String, Object> convertIntentSpecToMap(PetriIntentSpec intentSpec) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("modelType", intentSpec.getModelType());
+        map.put("name", intentSpec.getName());
+        map.put("description", intentSpec.getDescription());
+        map.put("schemaVersion", intentSpec.getSchemaVersion());
+        map.put("originalPrompt", intentSpec.getOriginalPrompt());
+        map.put("templateId", intentSpec.getTemplateId());
+        map.put("metadata", intentSpec.getMetadata());
+
+        // Convert steps to map format
+        List<Map<String, Object>> stepMaps = new ArrayList<>();
+        for (PetriIntentSpec.IntentStep step : intentSpec.getSteps()) {
+            Map<String, Object> stepMap = new HashMap<>();
+            stepMap.put("id", step.getId());
+            stepMap.put("type", step.getType().name());
+            stepMap.put("description", step.getDescription());
+            stepMap.put("dependencies", step.getDependencies());
+            stepMap.put("conditions", step.getConditions());
+            stepMap.put("metadata", step.getMetadata());
+            if (step.getWhen() != null) {
+                stepMap.put("when", step.getWhen());
+            }
+            stepMaps.add(stepMap);
+        }
+        map.put("steps", stepMaps);
+
+        return map;
+    }
+
+    /**
+     * Calculate confidence score based on parse result quality
+     */
+    private double calculateConfidence(PromptParser.CompoundParseResult parseResult) {
+        if (parseResult.getIntents().isEmpty()) {
+            return 0.0;
+        }
+
+        double confidence = 0.7; // Base confidence
+
+        // Higher confidence for recognized patterns
+        for (PromptParser.ParsedIntent intent : parseResult.getIntents()) {
+            if (!"generic".equals(intent.getAction())) {
+                confidence += 0.1;
+            }
+        }
+
+        return Math.min(confidence, 1.0);
+    }
+
+    /**
+     * Convert PetriIntentSpec from map format (for build endpoint)
+     */
+    private PetriIntentSpec convertMapToIntentSpec(Map<String, Object> intentMap) {
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> stepMaps = (List<Map<String, Object>>) intentMap.get("steps");
+
+        List<PetriIntentSpec.IntentStep> steps = new ArrayList<>();
+        for (Map<String, Object> stepMap : stepMaps) {
+            @SuppressWarnings("unchecked")
+            PetriIntentSpec.IntentStep step = new PetriIntentSpec.IntentStep(
+                (String) stepMap.get("id"),
+                PetriIntentSpec.StepType.valueOf((String) stepMap.get("type")),
+                (String) stepMap.get("description"),
+                (List<String>) stepMap.getOrDefault("dependencies", new ArrayList<>()),
+                (Map<String, Object>) stepMap.getOrDefault("conditions", new HashMap<>()),
+                (String) stepMap.get("when"),
+                (Map<String, Object>) stepMap.getOrDefault("metadata", new HashMap<>())
+            );
+            steps.add(step);
+        }
+
+        return new PetriIntentSpec(
+            (String) intentMap.getOrDefault("modelType", "PETRI"),
+            (String) intentMap.get("name"),
+            (String) intentMap.get("description"),
+            steps,
+            (Map<String, Object>) intentMap.getOrDefault("metadata", new HashMap<>()),
+            (String) intentMap.getOrDefault("schemaVersion", "1.0"),
+            (String) intentMap.get("originalPrompt"),
+            (String) intentMap.get("templateId")
+        );
+    }
+
+    /**
+     * Convert PetriNet to Map for JSON response
+     */
+    private Map<String, Object> convertPetriNetToMap(PetriNet petriNet) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", petriNet.getId());
+        map.put("name", petriNet.getName());
+        map.put("description", petriNet.getDescription());
+        map.put("schemaVersion", "1.0");
+
+        // Convert places
+        List<Map<String, Object>> placeMaps = new ArrayList<>();
+        for (core.petri.Place place : petriNet.getPlaces()) {
+            Map<String, Object> placeMap = new HashMap<>();
+            placeMap.put("id", place.getId());
+            placeMap.put("name", place.getName());
+            placeMap.put("description", place.getDescription());
+            placeMap.put("metadata", place.getMetadata());
+            placeMaps.add(placeMap);
+        }
+        map.put("places", placeMaps);
+
+        // Convert transitions
+        List<Map<String, Object>> transitionMaps = new ArrayList<>();
+        for (core.petri.Transition transition : petriNet.getTransitions()) {
+            Map<String, Object> transitionMap = new HashMap<>();
+            transitionMap.put("id", transition.getId());
+            transitionMap.put("name", transition.getName());
+            transitionMap.put("description", transition.getDescription());
+            transitionMap.put("metadata", transition.getMetadata());
+            transitionMaps.add(transitionMap);
+        }
+        map.put("transitions", transitionMaps);
+
+        // Convert arcs
+        List<Map<String, Object>> arcMaps = new ArrayList<>();
+        for (core.petri.Arc arc : petriNet.getArcs()) {
+            Map<String, Object> arcMap = new HashMap<>();
+            arcMap.put("from", arc.getFrom());
+            arcMap.put("to", arc.getTo());
+            arcMap.put("weight", arc.getWeight());
+            arcMap.put("metadata", arc.getMetadata());
+            arcMaps.add(arcMap);
+        }
+        map.put("arcs", arcMaps);
+
+        // Convert initial marking
+        Map<String, Object> initialMarking = new HashMap<>();
+        initialMarking.put("tokens", petriNet.getInitialMarking().getTokens());
+        map.put("initialMarking", initialMarking);
+
+        map.put("metadata", petriNet.getMetadata());
+
+        return map;
+    }
+
+    /**
+     * Create PetriNetValidator configuration from request
+     */
+    private PetriNetValidationResult.ValidationConfig createValidationConfig(PetriValidateRequest.ValidationConfig requestConfig) {
+        if (requestConfig == null) {
+            return PetriNetValidationResult.ValidationConfig.defaultConfig();
+        }
+
+        PetriNetValidationResult.ValidationConfig.Builder configBuilder = PetriNetValidationResult.ValidationConfig.builder();
+
+        if (requestConfig.getKBound() != null) {
+            configBuilder.kBound(requestConfig.getKBound());
+        }
+        if (requestConfig.getMaxMillis() != null) {
+            configBuilder.maxTimeMs(requestConfig.getMaxMillis());
+        }
+
+        // Configure enabled checks
+        Set<PetriNetValidationResult.CheckType> enabledChecks = new HashSet<>();
+        enabledChecks.add(PetriNetValidationResult.CheckType.STRUCTURAL_VALIDATION);
+
+        if (requestConfig.getEnableDeadlockCheck() == null || requestConfig.getEnableDeadlockCheck()) {
+            enabledChecks.add(PetriNetValidationResult.CheckType.DEADLOCK_DETECTION);
+        }
+        if (requestConfig.getEnableReachabilityCheck() == null || requestConfig.getEnableReachabilityCheck()) {
+            enabledChecks.add(PetriNetValidationResult.CheckType.REACHABILITY_ANALYSIS);
+        }
+        if (requestConfig.getEnableLivenessCheck() == null || requestConfig.getEnableLivenessCheck()) {
+            enabledChecks.add(PetriNetValidationResult.CheckType.LIVENESS_CHECK);
+        }
+        if (requestConfig.getEnableBoundednessCheck() == null || requestConfig.getEnableBoundednessCheck()) {
+            enabledChecks.add(PetriNetValidationResult.CheckType.BOUNDEDNESS_CHECK);
+        }
+
+        return configBuilder.enabledChecks(enabledChecks).build();
+    }
+
+    /**
+     * Convert PetriNetValidationResult to Map for JSON response
+     */
+    private Map<String, Object> convertValidationResultToMap(PetriNetValidationResult result) {
+        Map<String, Object> map = new HashMap<>();
+
+        map.put("status", result.getPetriStatus().name());
+        map.put("statesExplored", result.getStatesExplored());
+        map.put("validationTimeMs", result.getValidationTimeMs());
+
+        // Convert individual check results
+        Map<String, String> checks = new HashMap<>();
+        for (PetriNetValidationResult.CheckResult checkResult : result.getChecks()) {
+            checks.put(checkResult.getType().name().toLowerCase().replace("_", ""),
+                      checkResult.getStatus().name());
+        }
+        map.put("checks", checks);
+
+        // Add hints if any
+        if (!result.getHints().isEmpty()) {
+            map.put("hints", result.getHints());
+        }
+
+        // Add counter-example if validation failed
+        if (result.getCounterExample() != null) {
+            Map<String, Object> counterExample = new HashMap<>();
+            counterExample.put("marking", result.getCounterExample().getMarking().getTokens());
+            counterExample.put("path", result.getCounterExample().getPath());
+            counterExample.put("explanation", result.getCounterExample().getExplanation());
+            map.put("counterExample", counterExample);
+        }
+
+        return map;
+    }
+
+    /**
+     * Create SimulationConfig from request
+     */
+    private SimulationConfig createSimulationConfig(PetriSimulateRequest.SimulationConfig requestConfig) {
+        if (requestConfig == null) {
+            return SimulationConfig.defaultConfig();
+        }
+
+        SimulationConfig.Builder configBuilder = SimulationConfig.builder();
+
+        if (requestConfig.getSeed() != null) {
+            configBuilder.seed(requestConfig.getSeed());
+        }
+        if (requestConfig.getMode() != null) {
+            try {
+                SimulationConfig.Mode mode = SimulationConfig.Mode.valueOf(requestConfig.getMode().toUpperCase());
+                configBuilder.mode(mode);
+            } catch (IllegalArgumentException e) {
+                // Default to DETERMINISTIC if invalid mode
+                configBuilder.mode(SimulationConfig.Mode.DETERMINISTIC);
+            }
+        }
+        if (requestConfig.getMaxSteps() != null) {
+            configBuilder.maxSteps(requestConfig.getMaxSteps());
+        }
+        if (requestConfig.getStepDelayMs() != null) {
+            configBuilder.stepDelayMs(requestConfig.getStepDelayMs());
+        }
+        if (requestConfig.getEnableTrace() != null) {
+            configBuilder.verbose(requestConfig.getEnableTrace());
+        }
+
+        return configBuilder.build();
+    }
+
+    /**
+     * Convert SimulationResult to Map for JSON response
+     */
+    private Map<String, Object> convertSimulationResultToMap(SimulationResult result) {
+        Map<String, Object> map = new HashMap<>();
+
+        map.put("status", result.getStatus().name());
+        map.put("stepsExecuted", result.getStepsExecuted());
+        map.put("executionTimeMs", result.getExecutionTimeMs());
+        map.put("finalMarking", result.getFinalMarking().getTokens());
+
+        // Convert trace events
+        List<Map<String, Object>> traceMaps = new ArrayList<>();
+        for (core.petri.simulation.TraceEvent event : result.getTrace()) {
+            Map<String, Object> traceMap = new HashMap<>();
+            traceMap.put("step", event.getSequenceNumber());
+            traceMap.put("transition", event.getTransition());
+            traceMap.put("timestamp", event.getTimestamp().toEpochMilli());
+            traceMap.put("fromPlaces", event.getFromPlaces());
+            traceMap.put("toPlaces", event.getToPlaces());
+            traceMap.put("markingBefore", event.getMarkingBefore().getTokens());
+            traceMap.put("markingAfter", event.getMarkingAfter().getTokens());
+            if (event.getReason() != null) {
+                traceMap.put("reason", event.getReason());
+            }
+            traceMaps.add(traceMap);
+        }
+        map.put("trace", traceMaps);
+
+        // Add diagnostics if available
+        if (result.getDiagnostics() != null && !result.getDiagnostics().isEmpty()) {
+            map.put("diagnostics", result.getDiagnostics());
+        }
+
+        return map;
+    }
+
+    /**
+     * Generate basic DAG representation from PetriNet (placeholder until PetriToDagProjector is available)
+     */
+    private Map<String, Object> generateBasicDagFromPetriNet(PetriNet petriNet) {
+        Map<String, Object> dag = new HashMap<>();
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        List<Map<String, Object>> edges = new ArrayList<>();
+
+        // Convert transitions to DAG nodes
+        for (core.petri.Transition transition : petriNet.getTransitions()) {
+            Map<String, Object> node = new HashMap<>();
+            node.put("id", transition.getId());
+            node.put("name", transition.getName());
+            node.put("description", transition.getDescription());
+            node.put("type", "TRANSITION");
+            node.put("metadata", transition.getMetadata());
+            nodes.add(node);
+        }
+
+        // Generate edges based on Petri net connectivity
+        // This is a simplified approach - real PetriToDagProjector would handle complex patterns
+        for (core.petri.Arc arc : petriNet.getArcs()) {
+            // If arc goes from transition to place to transition, create DAG edge
+            if (petriNet.getTransition(arc.getFrom()).isPresent()) {
+                String fromTransition = arc.getFrom();
+                String toPlace = arc.getTo();
+
+                // Find transitions that consume from this place
+                for (core.petri.Arc nextArc : petriNet.getArcs()) {
+                    if (nextArc.getFrom().equals(toPlace) &&
+                        petriNet.getTransition(nextArc.getTo()).isPresent()) {
+                        Map<String, Object> edge = new HashMap<>();
+                        edge.put("from", fromTransition);
+                        edge.put("to", nextArc.getTo());
+                        edge.put("metadata", Map.of("viaPlace", toPlace));
+                        edges.add(edge);
+                    }
+                }
+            }
+        }
+
+        dag.put("nodes", nodes);
+        dag.put("edges", edges);
+        dag.put("metadata", Map.of(
+            "generatedBy", "BasicPetriNetProjector",
+            "note", "This is a simplified DAG projection. Full PetriToDagProjector coming soon.",
+            "originalPetriNetId", petriNet.getId()
+        ));
+
+        return dag;
+    }
+}

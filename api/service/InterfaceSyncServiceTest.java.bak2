@@ -1,0 +1,476 @@
+package api.service;
+
+import api.websocket.ExecutionWebSocketHandler;
+import api.websocket.MemorySyncWebSocketHandler;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.web.socket.WebSocketSession;
+import org.springframework.web.socket.TextMessage;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Comprehensive test suite for InterfaceSyncService
+ * Tests real-time synchronization between interfaces (CLI, Web, Mobile, Agent API)
+ */
+class InterfaceSyncServiceTest {
+
+    @Mock
+    private ExecutionWebSocketHandler executionWebSocketHandler;
+    
+    @Mock
+    private MemorySyncWebSocketHandler memorySyncWebSocketHandler;
+    
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
+    
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
+    
+    @Mock
+    private ObjectMapper objectMapper;
+    
+    @Mock
+    private WebSocketSession webSocketSession1;
+    
+    @Mock
+    private WebSocketSession webSocketSession2;
+    
+    @Captor
+    private ArgumentCaptor<String> topicCaptor;
+    
+    @Captor
+    private ArgumentCaptor<Object> messageCaptor;
+    
+    @Captor
+    private ArgumentCaptor<TextMessage> textMessageCaptor;
+    
+    private InterfaceSyncService interfaceSyncService;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(webSocketSession1.getId()).thenReturn("session-1");
+        when(webSocketSession2.getId()).thenReturn("session-2");
+        when(webSocketSession1.isOpen()).thenReturn(true);
+        when(webSocketSession2.isOpen()).thenReturn(true);
+        
+        interfaceSyncService = new InterfaceSyncService(
+            executionWebSocketHandler,
+            memorySyncWebSocketHandler,
+            messagingTemplate,
+            redisTemplate,
+            objectMapper
+        );
+    }
+
+    @Nested
+    @DisplayName("Interface Registration Tests")
+    class InterfaceRegistrationTests {
+
+        @Test
+        @DisplayName("Should register CLI interface successfully")
+        void shouldRegisterCliInterfaceSuccessfully() {
+            // Given
+            String sessionId = "cli-session-001";
+            String userId = "user-123";
+            InterfaceSyncService.InterfaceType interfaceType = InterfaceSyncService.InterfaceType.CLI;
+            Map<String, Object> metadata = Map.of("version", "1.0.0", "pid", "12345");
+
+            // When
+            InterfaceSyncService.InterfaceRegistration registration = 
+                interfaceSyncService.registerInterface(sessionId, userId, interfaceType, metadata);
+
+            // Then
+            assertThat(registration).isNotNull();
+            assertThat(registration.getSessionId()).isEqualTo(sessionId);
+            assertThat(registration.getUserId()).isEqualTo(userId);
+            assertThat(registration.getInterfaceType()).isEqualTo(interfaceType);
+            assertThat(registration.getMetadata()).containsEntry("version", "1.0.0");
+            assertThat(registration.getRegisteredAt()).isBeforeOrEqualTo(LocalDateTime.now());
+            
+            // Verify interface is stored in active interfaces
+            Collection<InterfaceSyncService.InterfaceRegistration> userInterfaces = 
+                interfaceSyncService.getActiveInterfacesForUser(userId);
+            assertThat(userInterfaces).hasSize(1);
+            assertThat(userInterfaces.iterator().next().getSessionId()).isEqualTo(sessionId);
+        }
+
+        @Test
+        @DisplayName("Should register multiple interfaces for same user")
+        void shouldRegisterMultipleInterfacesForSameUser() {
+            // Given
+            String userId = "user-123";
+            
+            // When
+            InterfaceSyncService.InterfaceRegistration cliReg = 
+                interfaceSyncService.registerInterface("cli-001", userId, 
+                    InterfaceSyncService.InterfaceType.CLI, Map.of("version", "1.0.0"));
+            
+            InterfaceSyncService.InterfaceRegistration webReg = 
+                interfaceSyncService.registerInterface("web-001", userId, 
+                    InterfaceSyncService.InterfaceType.WEB, Map.of("browser", "chrome"));
+
+            // Then
+            Collection<InterfaceSyncService.InterfaceRegistration> userInterfaces = 
+                interfaceSyncService.getActiveInterfacesForUser(userId);
+            assertThat(userInterfaces).hasSize(2);
+            
+            Set<InterfaceSyncService.InterfaceType> types = userInterfaces.stream()
+                .map(InterfaceSyncService.InterfaceRegistration::getInterfaceType)
+                .collect(java.util.stream.Collectors.toSet());
+            assertThat(types).containsExactlyInAnyOrder(
+                InterfaceSyncService.InterfaceType.CLI, 
+                InterfaceSyncService.InterfaceType.WEB);
+        }
+
+        @Test
+        @DisplayName("Should prevent duplicate session registration")
+        void shouldPreventDuplicateSessionRegistration() {
+            // Given
+            String sessionId = "duplicate-session";
+            String userId = "user-123";
+            interfaceSyncService.registerInterface(sessionId, userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            // When & Then
+            assertThatThrownBy(() -> 
+                interfaceSyncService.registerInterface(sessionId, userId, 
+                    InterfaceSyncService.InterfaceType.WEB, Map.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("Session already registered");
+        }
+
+        @Test
+        @DisplayName("Should unregister interface successfully")
+        void shouldUnregisterInterfaceSuccessfully() {
+            // Given
+            String sessionId = "session-to-remove";
+            String userId = "user-123";
+            interfaceSyncService.registerInterface(sessionId, userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            // When
+            boolean result = interfaceSyncService.unregisterInterface(sessionId);
+
+            // Then
+            assertThat(result).isTrue();
+            Collection<InterfaceSyncService.InterfaceRegistration> userInterfaces = 
+                interfaceSyncService.getActiveInterfacesForUser(userId);
+            assertThat(userInterfaces).isEmpty();
+        }
+    }
+
+    @Nested
+    @DisplayName("State Synchronization Tests")
+    class StateSynchronizationTests {
+
+        @Test
+        @DisplayName("Should broadcast state update to all user interfaces")
+        void shouldBroadcastStateUpdateToAllUserInterfaces() {
+            // Given
+            String userId = "user-123";
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+            interfaceSyncService.registerInterface("web-001", userId, 
+                InterfaceSyncService.InterfaceType.WEB, Map.of());
+
+            InterfaceSyncService.InterfaceStateUpdate stateUpdate = new InterfaceSyncService.InterfaceStateUpdate(
+                "execution-started", "exec-123", Map.of("status", "running"), userId);
+
+            // When
+            interfaceSyncService.broadcastStateUpdate(stateUpdate);
+
+            // Then
+            verify(messagingTemplate, times(2)).convertAndSend(anyString(), (Object) any());
+        }
+
+        @Test
+        @DisplayName("Should apply conflict resolution for concurrent updates")
+        void shouldApplyConflictResolutionForConcurrentUpdates() {
+            // Given
+            String userId = "user-123";
+            String resourceId = "resource-001";
+            
+            InterfaceSyncService.InterfaceStateUpdate update1 = new InterfaceSyncService.InterfaceStateUpdate(
+                "field-update", resourceId, Map.of("field", "value1", "timestamp", 1000L), userId);
+            
+            InterfaceSyncService.InterfaceStateUpdate update2 = new InterfaceSyncService.InterfaceStateUpdate(
+                "field-update", resourceId, Map.of("field", "value2", "timestamp", 2000L), userId);
+
+            // When
+            InterfaceSyncService.ConflictResolution resolution1 = 
+                interfaceSyncService.detectAndResolveConflicts(update1);
+            InterfaceSyncService.ConflictResolution resolution2 = 
+                interfaceSyncService.detectAndResolveConflicts(update2);
+
+            // Then
+            assertThat(resolution1.getResolution()).isEqualTo(
+                InterfaceSyncService.ConflictResolutionStrategy.ACCEPT);
+            assertThat(resolution2.getResolution()).isEqualTo(
+                InterfaceSyncService.ConflictResolutionStrategy.LAST_WRITE_WINS);
+        }
+
+        @Test
+        @DisplayName("Should batch multiple state updates for efficiency")
+        void shouldBatchMultipleStateUpdatesForEfficiency() {
+            // Given
+            String userId = "user-123";
+            List<InterfaceSyncService.InterfaceStateUpdate> updates = Arrays.asList(
+                new InterfaceSyncService.InterfaceStateUpdate("update1", "res1", Map.of("a", "1"), userId),
+                new InterfaceSyncService.InterfaceStateUpdate("update2", "res2", Map.of("b", "2"), userId),
+                new InterfaceSyncService.InterfaceStateUpdate("update3", "res3", Map.of("c", "3"), userId)
+            );
+
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            // When
+            CompletableFuture<Void> result = interfaceSyncService.batchBroadcast(updates);
+
+            // Then
+            assertThat(result).isNotNull();
+            result.join(); // Wait for completion
+            
+            // Verify single batched message sent instead of individual messages
+            verify(messagingTemplate, times(1)).convertAndSend(anyString(), (Object) any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Performance Optimization Tests")
+    class PerformanceOptimizationTests {
+
+        @Test
+        @DisplayName("Should compress large state updates")
+        void shouldCompressLargeStateUpdates() throws Exception {
+            // Given
+            Map<String, Object> largeData = new HashMap<>();
+            for (int i = 0; i < 1000; i++) {
+                largeData.put("key" + i, "value" + i + " with some additional data to make it larger");
+            }
+            
+            InterfaceSyncService.InterfaceStateUpdate largeUpdate = new InterfaceSyncService.InterfaceStateUpdate(
+                "large-update", "resource-001", largeData, "user-123");
+
+            when(objectMapper.writeValueAsBytes(any())).thenReturn(new byte[1024 * 5]); // 5KB
+
+            // When
+            byte[] compressed = interfaceSyncService.compressStateUpdate(largeUpdate);
+
+            // Then
+            assertThat(compressed).isNotNull();
+            assertThat(compressed.length).isLessThan(1024 * 5); // Should be compressed
+        }
+
+        @Test
+        @DisplayName("Should implement message deduplication")
+        void shouldImplementMessageDeduplication() {
+            // Given
+            String userId = "user-123";
+            InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                "duplicate-test", "resource-001", Map.of("value", "same"), userId);
+
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            // When - Send same update twice
+            interfaceSyncService.broadcastStateUpdate(update);
+            interfaceSyncService.broadcastStateUpdate(update);
+
+            // Then - Should only send once due to deduplication
+            verify(messagingTemplate, times(1)).convertAndSend(anyString(), (Object) any());
+        }
+
+        @Test
+        @DisplayName("Should throttle high-frequency updates")
+        void shouldThrottleHighFrequencyUpdates() throws InterruptedException {
+            // Given
+            String userId = "user-123";
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            // When - Send multiple rapid updates
+            for (int i = 0; i < 10; i++) {
+                InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                    "rapid-update", "resource-001", Map.of("counter", i), userId);
+                interfaceSyncService.broadcastStateUpdate(update);
+            }
+
+            Thread.sleep(100); // Allow throttling to take effect
+
+            // Then - Should throttle messages (fewer than 10 sent)
+            verify(messagingTemplate, atMost(5)).convertAndSend(anyString(), (Object) any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Error Handling Tests")
+    class ErrorHandlingTests {
+
+        @Test
+        @DisplayName("Should handle WebSocket connection failures gracefully")
+        void shouldHandleWebSocketConnectionFailuresGracefully() {
+            // Given
+            when(webSocketSession1.isOpen()).thenReturn(false);
+            String userId = "user-123";
+            interfaceSyncService.registerInterface("failed-session", userId, 
+                InterfaceSyncService.InterfaceType.WEB, Map.of());
+
+            InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                "test-update", "resource-001", Map.of("data", "test"), userId);
+
+            // When & Then - Should not throw exception
+            assertThatCode(() -> interfaceSyncService.broadcastStateUpdate(update))
+                .doesNotThrowAnyException();
+        }
+
+        @Test
+        @DisplayName("Should retry failed synchronization attempts")
+        void shouldRetryFailedSynchronizationAttempts() {
+            // Given
+            doThrow(new RuntimeException("Network error"))
+                .doNothing()
+                .when(messagingTemplate).convertAndSend(anyString(), (Object) any());
+
+            String userId = "user-123";
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                "retry-test", "resource-001", Map.of("data", "test"), userId);
+
+            // When
+            interfaceSyncService.broadcastStateUpdate(update);
+
+            // Then - Should retry and eventually succeed
+            verify(messagingTemplate, times(2)).convertAndSend(anyString(), (Object) any());
+        }
+
+        @Test
+        @DisplayName("Should track and report synchronization metrics")
+        void shouldTrackAndReportSynchronizationMetrics() {
+            // Given
+            String userId = "user-123";
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                "metrics-test", "resource-001", Map.of("data", "test"), userId);
+
+            // When
+            interfaceSyncService.broadcastStateUpdate(update);
+
+            // Then
+            InterfaceSyncService.SyncMetrics metrics = interfaceSyncService.getSyncMetrics();
+            assertThat(metrics).isNotNull();
+            assertThat(metrics.getTotalMessagesSent()).isGreaterThan(0);
+            assertThat(metrics.getActiveInterfaces()).isGreaterThan(0);
+        }
+    }
+
+    @Nested
+    @DisplayName("WebSocket Integration Tests")
+    class WebSocketIntegrationTests {
+
+        @Test
+        @DisplayName("Should integrate with existing ExecutionWebSocketHandler")
+        void shouldIntegrateWithExistingExecutionWebSocketHandler() {
+            // Given
+            String executionId = "exec-123";
+            Map<String, Object> executionData = Map.of("status", "running", "progress", 50);
+
+            // When
+            interfaceSyncService.notifyExecutionUpdate(executionId, executionData);
+
+            // Then
+            verify(executionWebSocketHandler).broadcastExecutionUpdate(
+                eq("execution_update"), eq(executionId), eq(executionData));
+        }
+
+        @Test
+        @DisplayName("Should integrate with existing MemorySyncWebSocketHandler")
+        void shouldIntegrateWithExistingMemorySyncWebSocketHandler() {
+            // Given
+            String agentId = "agent-123";
+            String executionId = "exec-123";
+            Map<String, Object> memoryData = Map.of("type", "file", "content", "test");
+
+            // When
+            interfaceSyncService.notifyMemoryUpdate(agentId, executionId, memoryData);
+
+            // Then
+            verify(memorySyncWebSocketHandler).broadcastMemoryUpdate(
+                eq(agentId), eq(executionId), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Security and Validation Tests")
+    class SecurityAndValidationTests {
+
+        @Test
+        @DisplayName("Should validate user permissions for interface access")
+        void shouldValidateUserPermissionsForInterfaceAccess() {
+            // Given
+            String userId = "user-123";
+            String restrictedUserId = "restricted-user";
+            
+            interfaceSyncService.registerInterface("cli-001", userId, 
+                InterfaceSyncService.InterfaceType.CLI, Map.of());
+
+            InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                "secure-update", "resource-001", Map.of("sensitive", "data"), restrictedUserId);
+
+            // When & Then - Should not broadcast to unauthorized user
+            interfaceSyncService.broadcastStateUpdate(update);
+            
+            // Verify no message sent (different user)
+            verify(messagingTemplate, never()).convertAndSend(anyString(), (Object) any());
+        }
+
+        @Test
+        @DisplayName("Should sanitize state update data")
+        void shouldSanitizeStateUpdateData() {
+            // Given
+            Map<String, Object> unsafeData = Map.of(
+                "script", "<script>alert('xss')</script>",
+                "password", "secret123",
+                "token", "jwt-token-here"
+            );
+
+            InterfaceSyncService.InterfaceStateUpdate update = new InterfaceSyncService.InterfaceStateUpdate(
+                "sanitize-test", "resource-001", unsafeData, "user-123");
+
+            // When
+            InterfaceSyncService.InterfaceStateUpdate sanitized = interfaceSyncService.sanitizeStateUpdate(update);
+
+            // Then
+            assertThat(sanitized.getData()).doesNotContainKeys("password", "token");
+            assertThat(sanitized.getData().get("script")).asString()
+                .doesNotContain("<script>").doesNotContain("alert");
+        }
+    }
+}

@@ -1,0 +1,339 @@
+package tests.api.service;
+
+import api.model.ExecutionStatusResponse;
+import api.model.PromptExecutionResponse;
+import api.service.StatusMonitoringService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+
+import java.time.LocalDateTime;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Unit tests for StatusMonitoringService
+ */
+public class StatusMonitoringServiceTest {
+    
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
+    
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
+    
+    private StatusMonitoringService statusMonitoringService;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        statusMonitoringService = new StatusMonitoringService(redisTemplate, messagingTemplate);
+    }
+    
+    @Test
+    void testTrackExecution_Success() {
+        // Arrange
+        String executionId = "exec_123456789";
+        String type = "prompt";
+        Map<String, Object> metadata = Map.of("async", true, "prompt", "test prompt");
+        
+        // Act
+        statusMonitoringService.trackExecution(executionId, type, metadata);
+        
+        // Assert
+        verify(valueOperations).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), eq(1L), any());
+        verify(messagingTemplate).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        verify(messagingTemplate).convertAndSend(eq("/topic/executions/all"), any(Map.class));
+        
+        assertEquals(1, statusMonitoringService.getActiveExecutionCount());
+    }
+    
+    @Test
+    void testUpdateProgress_Success() {
+        // Arrange
+        String executionId = "exec_123456789";
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        
+        // Act
+        statusMonitoringService.updateProgress(executionId, 3, 1, "task_2", new HashMap<>());
+        
+        // Assert
+        verify(valueOperations, times(2)).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), eq(1L), any());
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/all"), any(Map.class));
+    }
+    
+    @Test
+    void testCompleteExecution_Success() {
+        // Arrange
+        String executionId = "exec_123456789";
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        
+        PromptExecutionResponse result = PromptExecutionResponse.success(
+            executionId, "Execution completed", Map.of("result", "success"));
+        
+        // Act
+        statusMonitoringService.completeExecution(executionId, true, result);
+        
+        // Assert
+        verify(valueOperations, times(2)).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), anyLong(), any());
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/all"), any(Map.class));
+    }
+    
+    @Test
+    void testCancelExecution_Success() {
+        // Arrange
+        String executionId = "exec_123456789";
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        
+        // Act
+        boolean cancelled = statusMonitoringService.cancelExecution(executionId);
+        
+        // Assert
+        assertTrue(cancelled);
+        verify(valueOperations, times(2)).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), anyLong(), any());
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/all"), any(Map.class));
+    }
+    
+    @Test
+    void testCancelExecution_NotFound() {
+        // Arrange
+        String executionId = "exec_nonexistent";
+        
+        // Act
+        boolean cancelled = statusMonitoringService.cancelExecution(executionId);
+        
+        // Assert
+        assertFalse(cancelled);
+    }
+    
+    @Test
+    void testGetExecutionStatus_ActiveExecution() {
+        // Arrange
+        String executionId = "exec_123456789";
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        
+        // Act
+        ExecutionStatusResponse status = statusMonitoringService.getExecutionStatus(executionId);
+        
+        // Assert
+        assertNotNull(status);
+        assertEquals(executionId, status.getExecutionId());
+        assertEquals(ExecutionStatusResponse.ExecutionStatus.PENDING, status.getStatus());
+    }
+    
+    @Test
+    void testGetExecutionStatus_FromRedis() {
+        // Arrange
+        String executionId = "exec_123456789";
+        ExecutionStatusResponse cachedStatus = ExecutionStatusResponse.completed(
+            executionId, PromptExecutionResponse.success(executionId, "Success", new HashMap<>()));
+        
+        when(valueOperations.get("execution_status:" + executionId)).thenReturn(cachedStatus);
+        
+        // Act
+        ExecutionStatusResponse status = statusMonitoringService.getExecutionStatus(executionId);
+        
+        // Assert
+        assertNotNull(status);
+        assertEquals(executionId, status.getExecutionId());
+        assertEquals(ExecutionStatusResponse.ExecutionStatus.COMPLETED, status.getStatus());
+        
+        verify(valueOperations).get("execution_status:" + executionId);
+    }
+    
+    @Test
+    void testGetExecutionStatus_NotFound() {
+        // Arrange
+        String executionId = "exec_nonexistent";
+        when(valueOperations.get(anyString())).thenReturn(null);
+        
+        // Act
+        ExecutionStatusResponse status = statusMonitoringService.getExecutionStatus(executionId);
+        
+        // Assert
+        assertNotNull(status);
+        assertEquals(executionId, status.getExecutionId());
+        assertEquals(ExecutionStatusResponse.ExecutionStatus.FAILED, status.getStatus());
+        assertNotNull(status.getResult());
+        assertEquals("NOT_FOUND", status.getResult().getErrorType());
+    }
+    
+    @Test
+    void testGetExecutionHistory_Success() {
+        // Arrange
+        Set<String> keys = Set.of("execution_status:exec_1", "execution_status:exec_2");
+        when(redisTemplate.keys("execution_status:*")).thenReturn(keys);
+        
+        ExecutionStatusResponse exec1 = ExecutionStatusResponse.completed(
+            "exec_1", PromptExecutionResponse.success("exec_1", "Success", new HashMap<>()));
+        ExecutionStatusResponse exec2 = ExecutionStatusResponse.running(
+            "exec_2", new ExecutionStatusResponse.ExecutionProgress(2, 1, "task_1"));
+        
+        when(valueOperations.get("execution_status:exec_1")).thenReturn(exec1);
+        when(valueOperations.get("execution_status:exec_2")).thenReturn(exec2);
+        
+        // Act
+        Map<String, Object> history = statusMonitoringService.getExecutionHistory(0, 20, new HashMap<>());
+        
+        // Assert
+        assertNotNull(history);
+        assertTrue(history.containsKey("executions"));
+        assertTrue(history.containsKey("pagination"));
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> pagination = (Map<String, Object>) history.get("pagination");
+        assertEquals(2, pagination.get("total"));
+        assertEquals(0, pagination.get("offset"));
+        assertEquals(20, pagination.get("limit"));
+        assertEquals(false, pagination.get("hasMore"));
+    }
+    
+    @Test
+    void testGetExecutionMetrics_Success() {
+        // Arrange
+        Set<String> keys = Set.of("execution_status:exec_1", "execution_status:exec_2", "execution_status:exec_3");
+        when(redisTemplate.keys("execution_status:*")).thenReturn(keys);
+        
+        ExecutionStatusResponse completed = ExecutionStatusResponse.completed(
+            "exec_1", PromptExecutionResponse.success("exec_1", "Success", new HashMap<>()));
+        ExecutionStatusResponse failed = ExecutionStatusResponse.failed(
+            "exec_2", PromptExecutionResponse.failure("exec_2", "Failed", "ERROR"));
+        ExecutionStatusResponse running = ExecutionStatusResponse.running(
+            "exec_3", new ExecutionStatusResponse.ExecutionProgress(2, 1, "task_1"));
+        
+        when(valueOperations.get("execution_status:exec_1")).thenReturn(completed);
+        when(valueOperations.get("execution_status:exec_2")).thenReturn(failed);
+        when(valueOperations.get("execution_status:exec_3")).thenReturn(running);
+        
+        // Act
+        Map<String, Object> metrics = statusMonitoringService.getExecutionMetrics(new HashMap<>());
+        
+        // Assert
+        assertNotNull(metrics);
+        assertEquals(3L, metrics.get("totalExecutions"));
+        assertEquals(1L, metrics.get("completedExecutions"));
+        assertEquals(1L, metrics.get("failedExecutions"));
+        assertEquals(1L, metrics.get("runningExecutions"));
+        assertEquals(33.333333333333336, (Double) metrics.get("successRate"), 0.001);
+        assertTrue(metrics.containsKey("executionsByHour"));
+    }
+    
+    @Test
+    void testRegisterWebhook_Success() {
+        // Arrange
+        String executionId = "exec_123456789";
+        String webhookUrl = "https://example.com/webhook";
+        Map<String, String> headers = Map.of("Authorization", "Bearer token123");
+        String secret = "webhook_secret";
+        
+        // Act
+        boolean registered = statusMonitoringService.registerWebhook(executionId, webhookUrl, headers, secret);
+        
+        // Assert
+        assertTrue(registered);
+        assertEquals(1, statusMonitoringService.getWebhookSubscriptionCount());
+        
+        verify(valueOperations).set(eq("webhook:" + executionId), any(), eq(24L), any());
+    }
+    
+    @Test
+    void testGenerateETag_Success() {
+        // Arrange
+        ExecutionStatusResponse response = ExecutionStatusResponse.completed(
+            "exec_123", PromptExecutionResponse.success("exec_123", "Success", new HashMap<>()));
+        
+        // Act
+        String etag1 = statusMonitoringService.generateETag(response);
+        String etag2 = statusMonitoringService.generateETag(response);
+        
+        // Assert
+        assertNotNull(etag1);
+        assertNotNull(etag2);
+        assertEquals(etag1, etag2); // Same response should generate same ETag
+        assertTrue(etag1.startsWith("\""));
+        assertTrue(etag1.endsWith("\""));
+    }
+    
+    @Test
+    void testGenerateETag_DifferentResponses() {
+        // Arrange
+        ExecutionStatusResponse response1 = ExecutionStatusResponse.completed(
+            "exec_123", PromptExecutionResponse.success("exec_123", "Success", new HashMap<>()));
+        ExecutionStatusResponse response2 = ExecutionStatusResponse.running(
+            "exec_123", new ExecutionStatusResponse.ExecutionProgress(2, 1, "task_1"));
+        
+        // Act
+        String etag1 = statusMonitoringService.generateETag(response1);
+        String etag2 = statusMonitoringService.generateETag(response2);
+        
+        // Assert
+        assertNotNull(etag1);
+        assertNotNull(etag2);
+        assertNotEquals(etag1, etag2); // Different responses should generate different ETags
+    }
+    
+    @Test
+    void testGetComponentHealth_Success() {
+        // Act
+        Map<String, String> health = statusMonitoringService.getComponentHealth();
+        
+        // Assert
+        assertNotNull(health);
+        assertTrue(health.containsKey("redis"));
+        assertTrue(health.containsKey("websocket"));
+        assertTrue(health.containsKey("webhookDelivery"));
+        assertTrue(health.containsKey("progressTracking"));
+    }
+    
+    @Test
+    void testGetActiveExecutionCount_InitiallyZero() {
+        // Act
+        int count = statusMonitoringService.getActiveExecutionCount();
+        
+        // Assert
+        assertEquals(0, count);
+    }
+    
+    @Test
+    void testGetTotalExecutionCount_Success() {
+        // Arrange
+        Set<String> keys = Set.of("execution_status:exec_1", "execution_status:exec_2");
+        when(redisTemplate.keys("execution_status:*")).thenReturn(keys);
+        
+        // Act
+        long count = statusMonitoringService.getTotalExecutionCount();
+        
+        // Assert
+        assertEquals(2L, count);
+        verify(redisTemplate).keys("execution_status:*");
+    }
+    
+    @Test
+    void testGetWebhookSubscriptionCount_InitiallyZero() {
+        // Act
+        int count = statusMonitoringService.getWebhookSubscriptionCount();
+        
+        // Assert
+        assertEquals(0, count);
+    }
+}

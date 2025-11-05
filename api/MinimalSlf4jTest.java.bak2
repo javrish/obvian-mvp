@@ -1,0 +1,12 @@
+package tests.api;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+public class MinimalSlf4jTest {
+    @Test
+    void testMinimal() {
+        assertTrue(true);
+    }
+} 

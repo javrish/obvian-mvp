@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth Setup Flow Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        .flow-step {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+        .flow-step h3 {
+            color: #667eea;
+            margin-top: 0;
+        }
+        .screenshot {
+            border: 2px solid #e1e4e8;
+            border-radius: 8px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+        .code-block {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        .button-demo {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #667eea;
+            color: white;
+            border-radius: 8px;
+            text-decoration: none;
+            margin: 10px 5px;
+            transition: all 0.3s;
+        }
+        .button-demo:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .status-success {
+            background: #10b981;
+            color: white;
+        }
+        .status-pending {
+            background: #f59e0b;
+            color: white;
+        }
+        .credential-form {
+            background: white;
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        .form-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+        .alert-info {
+            background: #dbeafe;
+            border-left: 4px solid #3b82f6;
+            color: #1e40af;
+        }
+        .alert-success {
+            background: #d1fae5;
+            border-left: 4px solid #10b981;
+            color: #065f46;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 OAuth Credential Setup - UI Flow Demo</h1>
+        
+        <div class="alert alert-info">
+            <strong>✨ What's New:</strong> Users can now configure their own OAuth credentials directly from the UI - no code changes required!
+        </div>
+
+        <div class="flow-step">
+            <h3>Step 1: User Clicks "Connect with Google Workspace"</h3>
+            <p>When the user clicks the connect button for the first time:</p>
+            <div class="screenshot">
+                <div style="padding: 20px; background: #f8f9fa;">
+                    <button class="button-demo">🔷 Connect with Google Workspace</button>
+                </div>
+            </div>
+            <div class="code-block">
+// Frontend makes request
+POST /api/plugins/configure/google/oauth/initiate
+{
+  "userId": "demo-user",
+  "redirectUri": "http://localhost:3000/plugins"
+}
+
+// Backend response (no credentials configured)
+{
+  "success": false,
+  "requiresSetup": true,
+  "message": "Please configure OAuth credentials first"
+}
+            </div>
+        </div>
+
+        <div class="flow-step">
+            <h3>Step 2: Credential Setup Form Appears</h3>
+            <p>The OAuthCredentialSetup component is displayed with instructions:</p>
+            
+            <div class="credential-form">
+                <h4 style="text-align: center; color: #667eea;">Set Up Google Workspace OAuth</h4>
+                <p style="text-align: center; color: #666;">To connect Google Workspace, you'll need to create OAuth credentials in their developer console</p>
+                
+                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                    <h5 style="color: #333; margin-top: 0;">📋 Setup Instructions</h5>
+                    <ol style="color: #666; font-size: 14px;">
+                        <li>Go to https://console.cloud.google.com</li>
+                        <li>Create a new project or select existing</li>
+                        <li>Enable Calendar, Drive, and Gmail APIs</li>
+                        <li>Create OAuth 2.0 credentials (Web application)</li>
+                        <li>Add http://localhost:3000/plugins to redirect URIs</li>
+                        <li>Copy Client ID and Client Secret</li>
+                        <li>Paste them below</li>
+                    </ol>
+                    <div style="margin-top: 10px;">
+                        <a href="#" class="button-demo" style="font-size: 12px; padding: 5px 10px;">📚 Documentation</a>
+                        <a href="#" class="button-demo" style="font-size: 12px; padding: 5px 10px;">🎥 Video Tutorial</a>
+                        <a href="#" class="button-demo" style="font-size: 12px; padding: 5px 10px;">☁️ Google Cloud Console</a>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Client ID <span style="color: red;">*</span></label>
+                    <input type="text" class="form-input" placeholder="xxxxx.apps.googleusercontent.com">
+                    <small style="color: #666;">This is public and safe to share</small>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Client Secret</label>
+                    <input type="password" class="form-input" placeholder="Your Client Secret">
+                    <small style="color: #666;">Keep this secret and never share it publicly</small>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button class="button-demo" style="flex: 1; background: #e5e7eb; color: #333;">Skip for Now</button>
+                    <button class="button-demo" style="flex: 1;">✅ Save Credentials</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flow-step">
+            <h3>Step 3: User Saves Credentials</h3>
+            <p>When the user clicks "Save Credentials":</p>
+            <div class="code-block">
+// Frontend sends credentials to backend
+POST /api/oauth/credentials
+{
+  "pluginId": "google",
+  "userId": "demo-user",
+  "clientId": "1072646854293-xxx.apps.googleusercontent.com",
+  "clientSecret": "GOCSPX-xxxxx"
+}
+
+// Backend saves to ~/.obvian_oauth_credentials.properties
+google.demo-user.clientId=1072646854293-xxx.apps.googleusercontent.com
+google.demo-user.clientSecret=GOCSPX-xxxxx
+
+// Response
+{
+  "success": true,
+  "message": "OAuth credentials saved successfully"
+}
+            </div>
+            <div class="alert alert-success">
+                ✅ Credentials saved! The OAuth flow will now start automatically.
+            </div>
+        </div>
+
+        <div class="flow-step">
+            <h3>Step 4: OAuth Flow Starts Automatically</h3>
+            <p>After credentials are saved, the OAuth flow initiates with the user's credentials:</p>
+            <div class="code-block">
+// Frontend retries OAuth initiation
+POST /api/plugins/configure/google/oauth/initiate
+
+// Backend now uses saved credentials
+{
+  "success": true,
+  "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth?client_id=USER_CLIENT_ID&...",
+  "state": "xxx-xxx-xxx"
+}
+            </div>
+            <p>A popup window opens with Google's OAuth consent screen using the user's Client ID.</p>
+        </div>
+
+        <div class="flow-step">
+            <h3>Step 5: User Completes Authorization</h3>
+            <p>The user logs into Google and grants permissions. After completion:</p>
+            <ul>
+                <li>Access token is received and stored</li>
+                <li>Plugin status changes to <span class="status-badge status-success">Connected</span></li>
+                <li>User can now use Google Workspace features in their workflows</li>
+            </ul>
+        </div>
+
+        <div class="alert alert-success">
+            <h4>🎉 Complete Flow Summary</h4>
+            <ol>
+                <li>User clicks "Connect" → System detects no credentials</li>
+                <li>Credential setup form appears with instructions</li>
+                <li>User creates OAuth app in Google Cloud Console</li>
+                <li>User pastes Client ID and Secret in Obvian UI</li>
+                <li>Credentials are saved securely per user</li>
+                <li>OAuth flow starts automatically with saved credentials</li>
+                <li>User authorizes and plugin is connected!</li>
+            </ol>
+        </div>
+
+        <div style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 12px;">
+            <h3 style="color: #667eea;">Key Benefits</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-top: 20px;">
+                <div style="padding: 15px; background: white; border-radius: 8px;">
+                    <strong>🚀 No Code Changes</strong>
+                    <p style="color: #666; margin: 5px 0;">Users configure everything through the UI</p>
+                </div>
+                <div style="padding: 15px; background: white; border-radius: 8px;">
+                    <strong>👥 Multi-Tenant</strong>
+                    <p style="color: #666; margin: 5px 0;">Each user has their own credentials</p>
+                </div>
+                <div style="padding: 15px; background: white; border-radius: 8px;">
+                    <strong>🔒 Secure</strong>
+                    <p style="color: #666; margin: 5px 0;">Credentials stored encrypted, never in code</p>
+                </div>
+                <div style="padding: 15px; background: white; border-radius: 8px;">
+                    <strong>📚 Self-Service</strong>
+                    <p style="color: #666; margin: 5px 0;">Clear instructions for each service</p>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 40px;">
+            <a href="http://localhost:3000/plugins" class="button-demo">
+                🚀 Try It Now - Open Plugins Page
+            </a>
+        </div>
+    </div>
+</body>
+</html>

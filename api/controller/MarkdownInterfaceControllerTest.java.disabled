@@ -1,0 +1,393 @@
+package api.controller;
+
+import api.model.*;
+import api.service.MarkdownInterfaceService;\nimport api.config.CorsConfig;
+import api.security.JwtAuthenticationEntryPoint;
+import api.security.JwtAuthenticationFilter;
+import api.middleware.RateLimitingFilter;
+import api.middleware.RequestValidationFilter;
+import core.DAG;
+import core.LiveDagPreview;
+import core.TaskNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * Comprehensive test suite for MarkdownInterfaceController - REST API endpoint testing
+ * with security, validation, and performance verification.
+ * 
+ * Phase 26.1b: MarkdownNativePromptInterface Backend Testing
+ * Target: Complete API coverage, security validation, error handling
+ */
+@WebMvcTest(controllers = MarkdownInterfaceController.class)
+@ActiveProfiles("test")
+@Tag("fast")
+@Tag("api")
+class MarkdownInterfaceControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockBean
+    private MarkdownInterfaceService markdownInterfaceService;
+
+    // Security components that need to be mocked for @WebMvcTest
+    @MockBean
+    private JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    
+    @MockBean
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
+    
+    @MockBean
+    private RequestValidationFilter requestValidationFilter;
+    
+    @MockBean
+    private RateLimitingFilter rateLimitingFilter;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    private static final String BASE_URL = "/api/markdown";
+
+    @BeforeEach
+    void setUpController() {
+        // Setup common mock behaviors for async methods
+        when(markdownInterfaceService.parseMarkdownAsync(any(MarkdownParseRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(createMockParseResponse()));
+        
+        when(markdownInterfaceService.renderDagAsync(any(DagRenderRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(createMockRenderResponse()));
+            
+        when(markdownInterfaceService.generatePreviewAsync(any(LivePreviewRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(createMockLivePreviewResponse()));
+            
+        when(markdownInterfaceService.validateMarkdownAsync(any(MarkdownValidationRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(createMockValidationResponse()));
+            
+        when(markdownInterfaceService.generateSuggestionsAsync(any(MarkdownSuggestionRequest.class)))
+            .thenReturn(CompletableFuture.completedFuture(createMockSuggestionResponse()));
+            
+        // Setup common mock behaviors for sync methods
+        when(markdownInterfaceService.parseMarkdown(any(MarkdownParseRequest.class)))
+            .thenReturn(createMockParseResponse());
+            
+        when(markdownInterfaceService.renderDag(any(DagRenderRequest.class)))
+            .thenReturn(createMockRenderResponse());
+    }
+
+    @Test
+    @WithMockUser
+    void testParseMarkdown() throws Exception {
+        // Arrange
+        MarkdownParseRequest request = createMarkdownParseRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        MvcResult result = mockMvc.perform(post(BASE_URL + "/parse")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.dag").exists())
+                .andExpect(jsonPath("$.causalInsights").exists())
+                .andReturn();
+
+        // Verify service interaction
+        verify(markdownInterfaceService).parseMarkdownAsync(any(MarkdownParseRequest.class));
+        
+        String responseBody = result.getResponse().getContentAsString();
+        MarkdownParseResponse response = objectMapper.readValue(responseBody, MarkdownParseResponse.class);
+        
+        assertNotNull(response);
+        assertTrue(response.isSuccess());
+        assertNotNull(response.getDag());
+    }
+
+    @Test
+    @WithMockUser
+    void testRenderDag() throws Exception {
+        // Arrange
+        DagRenderRequest request = createDagRenderRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/render")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.markdown").exists());
+
+        verify(markdownInterfaceService).renderDagAsync(any(DagRenderRequest.class));
+    }
+
+    @Test
+    @WithMockUser
+    void testGeneratePreview() throws Exception {
+        // Arrange
+        LivePreviewRequest request = createLivePreviewRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/preview")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.sessionId").value("test-session-123"))
+                .andExpect(jsonPath("$.renderedMarkdown").exists());
+
+        verify(markdownInterfaceService).generatePreviewAsync(any(LivePreviewRequest.class));
+    }
+
+    @Test
+    @WithMockUser
+    void testValidateMarkdown() throws Exception {
+        // Arrange
+        MarkdownValidationRequest request = createMarkdownValidationRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/validate")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.valid").value(true))
+                .andExpect(jsonPath("$.errors").exists());
+
+        verify(markdownInterfaceService).validateMarkdownAsync(any(MarkdownValidationRequest.class));
+    }
+
+    @Test
+    @WithMockUser
+    void testGenerateSuggestions() throws Exception {
+        // Arrange
+        MarkdownSuggestionRequest request = createMarkdownSuggestionRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/suggestions")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.suggestions").exists())
+                .andExpect(jsonPath("$.suggestions").isArray());
+
+        verify(markdownInterfaceService).generateSuggestionsAsync(any(MarkdownSuggestionRequest.class));
+    }
+
+    @Test
+    @WithMockUser
+    void testAsyncParseMarkdown() throws Exception {
+        // Arrange
+        MarkdownParseRequest request = createMarkdownParseRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/parse")
+                .param("async", "true")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.dag").exists());
+
+        verify(markdownInterfaceService).parseMarkdownAsync(any(MarkdownParseRequest.class));
+    }
+
+    @Test
+    @WithMockUser
+    void testAsyncRenderDag() throws Exception {
+        // Arrange
+        DagRenderRequest request = createDagRenderRequest();
+        String requestJson = objectMapper.writeValueAsString(request);
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/render")
+                .param("async", "true")
+                .with(csrf())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.markdown").exists());
+
+        verify(markdownInterfaceService).renderDagAsync(any(DagRenderRequest.class));
+    }
+
+    @Test
+    void testUnauthorizedAccess() throws Exception {
+        // Arrange
+        String requestJson = objectMapper.writeValueAsString(createMarkdownParseRequest());
+
+        // Act & Assert
+        mockMvc.perform(post(BASE_URL + "/parse")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestJson))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @WithMockUser
+    void testHealthCheck() throws Exception {
+        // Act & Assert
+        mockMvc.perform(get(BASE_URL + "/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("UP"))
+                .andExpect(jsonPath("$.service").value("MarkdownInterfaceController"))
+                .andExpect(jsonPath("$.version").value("Phase-26.1b"));
+    }
+
+    // Helper methods for creating test data
+    private MarkdownParseRequest createMarkdownParseRequest() {
+        MarkdownParseRequest request = new MarkdownParseRequest();
+        request.setUserId("test-user");
+        request.setMarkdown(createTestMarkdown());
+        
+        MarkdownParseRequest.ParseOptions options = new MarkdownParseRequest.ParseOptions();
+        options.setValidateStructure(true);
+        options.setIncludeCausalInsights(true);
+        request.setParseOptions(options);
+        return request;
+    }
+    
+    private DagRenderRequest createDagRenderRequest() {
+        DagRenderRequest request = new DagRenderRequest();
+        request.setUserId("test-user");
+        request.setDag(createTestDAG());
+        
+        DagRenderRequest.RenderOptions options = new DagRenderRequest.RenderOptions();
+        options.setIncludeCausalInsights(true);
+        options.setMode("STANDARD");
+        request.setRenderOptions(options);
+        return request;
+    }
+    
+    private LivePreviewRequest createLivePreviewRequest() {
+        LivePreviewRequest request = new LivePreviewRequest();
+        request.setUserId("test-user");
+        request.setSessionId("test-session-123");
+        request.setMarkdown(createTestMarkdown());
+        request.setIncrementalUpdate(false);
+        return request;
+    }
+    
+    private MarkdownValidationRequest createMarkdownValidationRequest() {
+        MarkdownValidationRequest request = new MarkdownValidationRequest();
+        request.setUserId("test-user");
+        request.setMarkdown(createTestMarkdown());
+        return request;
+    }
+    
+    private MarkdownSuggestionRequest createMarkdownSuggestionRequest() {
+        MarkdownSuggestionRequest request = new MarkdownSuggestionRequest();
+        request.setUserId("test-user");
+        request.setPartialMarkdown("# DAG Execu");
+        request.setCursorPosition(12);
+        return request;
+    }
+
+    private MarkdownParseResponse createMockParseResponse() {
+        MarkdownParseResponse response = new MarkdownParseResponse();
+        response.setSuccess(true);
+        response.setDag(createTestDAG());
+        response.setCausalInsights(new ArrayList<>());
+        return response;
+    }
+    
+    private DagRenderResponse createMockRenderResponse() {
+        DagRenderResponse response = new DagRenderResponse();
+        response.setSuccess(true);
+        response.setMarkdown(createTestMarkdown());
+        return response;
+    }
+    
+    private MarkdownValidationResponse createMockValidationResponse() {
+        MarkdownValidationResponse response = new MarkdownValidationResponse();
+        response.setValid(true);
+        return response;
+    }
+    
+    private MarkdownSuggestionResponse createMockSuggestionResponse() {
+        MarkdownSuggestionResponse response = new MarkdownSuggestionResponse();
+        response.setSuggestions(new ArrayList<>());
+        return response;
+    }
+
+    private LivePreviewResponse createMockLivePreviewResponse() {
+        LivePreviewResponse response = new LivePreviewResponse();
+        response.setSuccess(true);
+        response.setSessionId("test-session-123");
+        response.setRenderedMarkdown(createTestMarkdown());
+        response.setWebsocketUrl("ws://localhost:8080/ws/live-preview/test-session-123");
+        return response;
+    }
+
+    private Map<String, Object> createMockCADRInsights() {
+        Map<String, Object> insights = new HashMap<>();
+        insights.put("causalStrengths", Map.of("task1->task2", 0.87, "task2->task3", 0.76));
+        insights.put("confidenceIntervals", Map.of("task1->task2", new double[]{0.82, 0.92}));
+        insights.put("temporalConstraints", Map.of("task1", "daily at 9am"));
+        return insights;
+    }
+
+    private DAG createTestDAG() {
+        DAG dag = new DAG();
+        TaskNode node1 = new TaskNode("task1", "EmailPlugin", Map.of("to", "test@example.com"));
+        TaskNode node2 = new TaskNode("task2", "FilePlugin", Map.of("path", "/tmp/output.txt"));
+        
+        dag.addNode(node1);
+        dag.addNode(node2);
+        dag.addDependency("task1", "task2");
+        
+        return dag;
+    }
+
+    private String createTestMarkdown() {
+        return """
+            # DAG Execution Plan
+            
+            ## Task: task1
+            **Plugin:** EmailPlugin
+            **Parameters:**
+            - to: test@example.com
+            
+            ## Task: task2
+            **Plugin:** FilePlugin
+            **Parameters:**
+            - path: /tmp/output.txt
+            
+            **Dependencies:** task1 → task2
+            """;
+    }
+
+}

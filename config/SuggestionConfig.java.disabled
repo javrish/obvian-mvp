@@ -1,0 +1,52 @@
+package api.config;
+
+import core.*;
+import memory.MemoryStore;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
+
+/**
+ * Spring configuration for the Autonomous Suggestion Engine components
+ */
+@Configuration
+public class SuggestionConfig {
+    
+    /**
+     * Configure PatternAnalyzer as a Spring bean
+     */
+    @Bean
+    @Lazy
+    public PatternAnalyzer patternAnalyzer(MemoryStore memoryStore) {
+        return new PatternAnalyzer(memoryStore);
+    }
+    
+    /**
+     * Configure OpportunityDetector as a Spring bean
+     */
+    @Bean
+    @Lazy
+    public OpportunityDetector opportunityDetector(PatternAnalyzer patternAnalyzer, MemoryStore memoryStore) {
+        return new OpportunityDetector(patternAnalyzer, memoryStore);
+    }
+    
+    /**
+     * Configure ConsoleSuggestionDeliveryService as a Spring bean
+     */
+    @Bean
+    public ConsoleSuggestionDeliveryService suggestionDeliveryService() {
+        return new ConsoleSuggestionDeliveryService();
+    }
+    
+    /**
+     * Configure SuggestionScheduler as a Spring bean
+     */
+    @Bean
+    @Lazy
+    public SuggestionScheduler suggestionScheduler(PatternAnalyzer patternAnalyzer,
+                                                   OpportunityDetector opportunityDetector,
+                                                   MemoryStore memoryStore,
+                                                   ConsoleSuggestionDeliveryService deliveryService) {
+        return new SuggestionScheduler(patternAnalyzer, opportunityDetector, memoryStore, deliveryService);
+    }
+}

@@ -1,0 +1,168 @@
+package api.config;
+
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer;
+import org.springframework.data.redis.serializer.StringRedisSerializer;
+import org.springframework.boot.jdbc.DataSourceBuilder;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.Network;
+import org.testcontainers.utility.DockerImageName;
+
+import javax.sql.DataSource;
+import java.time.Duration;
+
+/**
+ * TestContainers configuration for integration tests requiring real databases.
+ * Provides PostgreSQL and Redis containers with proper networking and lifecycle management.
+ */
+@TestConfiguration
+@Import(BaseTestConfiguration.class)
+@EnableAutoConfiguration
+@Profile("testcontainers")
+public class TestContainersConfiguration {
+    
+    private static final String POSTGRES_IMAGE = "postgres:15-alpine";
+    private static final String REDIS_IMAGE = "redis:7-alpine";
+    private static final String DATABASE_NAME = "obvian_test";
+    private static final String DATABASE_USERNAME = "test_user";
+    private static final String DATABASE_PASSWORD = "test_password";
+    
+    @Bean("testContainersNetwork")
+    public Network testContainersNetwork() {
+        return Network.newNetwork();
+    }
+    
+    @Bean("postgresContainer")
+    public PostgreSQLContainer<?> postgresContainer() {
+        PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(DockerImageName.parse(POSTGRES_IMAGE))
+            .withDatabaseName(DATABASE_NAME)
+            .withUsername(DATABASE_USERNAME)
+            .withPassword(DATABASE_PASSWORD)
+            .withNetworkAliases("postgres")
+            .withNetwork(testContainersNetwork())
+            .withReuse(true)\n            .withStartupTimeout(Duration.ofMinutes(2))
+            .withCommand(\"postgres\", \"-c\", \"max_connections=200\", \"-c\", \"shared_buffers=128MB\");
+        
+        postgres.start();
+        return postgres;
+    }
+    
+    @Bean(\"redisContainer\")
+    public GenericContainer<?> redisContainer() {
+        GenericContainer<?> redis = new GenericContainer<>(DockerImageName.parse(REDIS_IMAGE))
+            .withExposedPorts(6379)
+            .withNetworkAliases(\"redis\")
+            .withNetwork(testContainersNetwork())
+            .withReuse(true)
+            .withStartupTimeout(Duration.ofMinutes(1))
+            .withCommand(\"redis-server\", \"--maxmemory\", \"256mb\", \"--maxmemory-policy\", \"allkeys-lru\");
+        
+        redis.start();
+        return redis;
+    }
+    
+    @Bean(\"testContainersDataSource\")
+    @Primary
+    public DataSource testContainersDataSource() {
+        PostgreSQLContainer<?> postgres = postgresContainer();
+        
+        return DataSourceBuilder.create()
+            .driverClassName(\"org.postgresql.Driver\")
+            .url(postgres.getJdbcUrl())
+            .username(postgres.getUsername())
+            .password(postgres.getPassword())
+            .build();
+    }
+    
+    @Bean(\"testContainersRedisConnectionFactory\")
+    @Primary
+    public RedisConnectionFactory testContainersRedisConnectionFactory() {
+        GenericContainer<?> redis = redisContainer();
+        
+        LettuceConnectionFactory factory = new LettuceConnectionFactory(
+            redis.getHost(), 
+            redis.getMappedPort(6379)
+        );
+        factory.setValidateConnection(true);
+        factory.afterPropertiesSet();
+        return factory;
+    }
+    
+    @Bean(\"testContainersRedisTemplate\")
+    @Primary
+    public RedisTemplate<String, Object> testContainersRedisTemplate() {
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        template.setConnectionFactory(testContainersRedisConnectionFactory());
+        
+        // Configure serializers
+        template.setKeySerializer(new StringRedisSerializer());
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        template.setHashKeySerializer(new StringRedisSerializer());
+        template.setHashValueSerializer(new GenericJackson2JsonRedisSerializer());
+        
+        template.afterPropertiesSet();
+        return template;
+    }
+    
+    /**
+     * Configuration for container health checks and monitoring
+     */
+    public static class ContainerHealthConfig {
+        public static final Duration STARTUP_TIMEOUT = Duration.ofMinutes(3);
+        public static final Duration HEALTH_CHECK_INTERVAL = Duration.ofSeconds(10);
+        public static final int MAX_HEALTH_CHECK_RETRIES = 10;
+        
+        public static boolean isContainerHealthy(GenericContainer<?> container) {
+            return container.isRunning() && container.isHealthy();
+        }
+        
+        public static void waitForContainerHealth(GenericContainer<?> container) throws InterruptedException {
+            int retries = 0;
+            while (!isContainerHealthy(container) && retries < MAX_HEALTH_CHECK_RETRIES) {
+                Thread.sleep(HEALTH_CHECK_INTERVAL.toMillis());
+                retries++;
+            }
+            
+            if (!isContainerHealthy(container)) {
+                throw new RuntimeException(\"Container failed to become healthy: \" + container.getDockerImageName());
+            }
+        }
+    }
+    
+    /**
+     * Database initialization and migration utilities for tests
+     */
+    public static class TestDatabaseUtils {
+        public static void initializeTestData(DataSource dataSource) {
+            // Implementation for test data initialization
+            // This can include schema creation, test data insertion, etc.
+        }
+        
+        public static void cleanupTestData(DataSource dataSource) {
+            // Implementation for test data cleanup
+            // This can include truncating tables, resetting sequences, etc.
+        }
+    }
+    
+    /**
+     * Redis utilities for test data management
+     */
+    public static class TestRedisUtils {
+        public static void flushTestData(RedisTemplate<String, Object> redisTemplate) {
+            redisTemplate.getConnectionFactory().getConnection().flushAll();
+        }
+        
+        public static void populateTestCache(RedisTemplate<String, Object> redisTemplate) {
+            // Implementation for populating test cache data
+        }
+    }
+}

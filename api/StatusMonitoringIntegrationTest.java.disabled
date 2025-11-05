@@ -1,0 +1,295 @@
+package tests.api;
+
+import api.controller.StatusController;
+import api.model.ExecutionStatusResponse;
+import api.model.PromptExecutionResponse;
+import api.service.StatusMonitoringService;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.http.MediaType;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * Comprehensive integration tests for status monitoring functionality
+ */
+public class StatusMonitoringIntegrationTest {
+    
+    private MockMvc mockMvc;
+    
+    @Mock
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    @Mock
+    private ValueOperations<String, Object> valueOperations;
+    
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
+    
+    private StatusMonitoringService statusMonitoringService;
+    private StatusController statusController;
+    private ObjectMapper objectMapper;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        
+        statusMonitoringService = new StatusMonitoringService(redisTemplate, messagingTemplate);
+        statusController = new StatusController(statusMonitoringService);
+        mockMvc = MockMvcBuilders.standaloneSetup(statusController).build();
+        objectMapper = new ObjectMapper();
+    }
+    
+    @Test
+    void testCompleteExecutionLifecycle_Success() throws Exception {
+        // Arrange
+        String executionId = "exec_lifecycle_test";
+        String type = "prompt";
+        Map<String, Object> metadata = Map.of("async", true, "prompt", "test prompt");
+        
+        // Act 1: Track execution start
+        statusMonitoringService.trackExecution(executionId, type, metadata);
+        
+        // Verify initial tracking
+        assertEquals(1, statusMonitoringService.getActiveExecutionCount());
+        verify(valueOperations).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), eq(1L), eq(TimeUnit.HOURS));
+        verify(messagingTemplate).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        verify(messagingTemplate).convertAndSend(eq("/topic/executions/all"), any(Map.class));
+        
+        // Act 2: Update progress
+        statusMonitoringService.updateProgress(executionId, 3, 1, "task_1", new HashMap<>());
+        
+        // Verify progress update
+        verify(valueOperations, times(2)).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), eq(1L), eq(TimeUnit.HOURS));
+        verify(messagingTemplate, times(2)).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        
+        // Act 3: Get status via API (should show running)
+        ExecutionStatusResponse runningStatus = statusMonitoringService.getExecutionStatus(executionId);
+        assertNotNull(runningStatus);
+        assertEquals(ExecutionStatusResponse.ExecutionStatus.RUNNING, runningStatus.getStatus());
+        assertNotNull(runningStatus.getProgress());
+        assertEquals(3, runningStatus.getProgress().getTotalNodes());
+        assertEquals(1, runningStatus.getProgress().getCompletedNodes());
+        assertEquals("task_1", runningStatus.getProgress().getCurrentNode());
+        
+        // Act 4: Update progress again
+        statusMonitoringService.updateProgress(executionId, 3, 2, "task_2", new HashMap<>());
+        
+        // Act 5: Complete execution
+        PromptExecutionResponse result = PromptExecutionResponse.success(
+            executionId, "Execution completed successfully", Map.of("result", "success"));
+        statusMonitoringService.completeExecution(executionId, true, result);
+        
+        // Verify completion
+        verify(valueOperations, times(4)).set(eq("execution_status:" + executionId), 
+            any(ExecutionStatusResponse.class), anyLong(), any(TimeUnit.class));
+        verify(messagingTemplate, times(4)).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+        
+        // Act 6: Get final status
+        ExecutionStatusResponse finalStatus = statusMonitoringService.getExecutionStatus(executionId);
+        assertNotNull(finalStatus);
+        assertEquals(ExecutionStatusResponse.ExecutionStatus.COMPLETED, finalStatus.getStatus());
+        assertNotNull(finalStatus.getResult());
+        assertTrue(finalStatus.getResult().isSuccess());
+    }
+    
+    @Test
+    void testExecutionCancellation_Success() throws Exception {
+        // Arrange
+        String executionId = "exec_cancel_test";
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        statusMonitoringService.updateProgress(executionId, 3, 1, "task_1", new HashMap<>());
+        
+        // Act: Cancel execution via API
+        mockMvc.perform(delete("/api/v1/executions/{executionId}", executionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.executionId").value(executionId))
+                .andExpect(jsonPath("$.cancelled").value(true))
+                .andExpect(jsonPath("$.message").value("Execution cancelled successfully"));
+        
+        // Verify cancellation
+        ExecutionStatusResponse cancelledStatus = statusMonitoringService.getExecutionStatus(executionId);
+        assertEquals(ExecutionStatusResponse.ExecutionStatus.CANCELLED, cancelledStatus.getStatus());
+        
+        // Verify WebSocket broadcast
+        verify(messagingTemplate, atLeast(3)).convertAndSend(eq("/topic/executions/" + executionId), any(Map.class));
+    }
+    
+    @Test
+    void testWebhookRegistrationAndDelivery_Success() throws Exception {
+        // Arrange
+        String executionId = "exec_webhook_test";
+        String webhookUrl = "https://example.com/webhook";
+        Map<String, Object> webhookRequest = new HashMap<>();
+        webhookRequest.put("url", webhookUrl);
+        webhookRequest.put("headers", Map.of("Authorization", "Bearer token123"));
+        webhookRequest.put("secret", "webhook_secret");
+        
+        // Act 1: Register webhook
+        mockMvc.perform(post("/api/v1/executions/{executionId}/webhook", executionId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(webhookRequest)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.executionId").value(executionId))
+                .andExpect(jsonPath("$.webhookUrl").value(webhookUrl))
+                .andExpect(jsonPath("$.registered").value(true));
+        
+        // Verify webhook registration
+        assertEquals(1, statusMonitoringService.getWebhookSubscriptionCount());
+        verify(valueOperations).set(eq("webhook:" + executionId), any(), eq(24L), eq(TimeUnit.HOURS));
+        
+        // Act 2: Track and complete execution (should trigger webhook)
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        PromptExecutionResponse result = PromptExecutionResponse.success(
+            executionId, "Success", Map.of("result", "data"));
+        statusMonitoringService.completeExecution(executionId, true, result);
+        
+        // Note: Webhook delivery is async, so we can't easily test the HTTP call
+        // In a real test, we'd use a mock HTTP server or verify the RestTemplate calls
+    }
+    
+    @Test
+    void testETagSupport_Success() throws Exception {
+        // Arrange
+        String executionId = "exec_etag_test";
+        statusMonitoringService.trackExecution(executionId, "prompt", new HashMap<>());
+        
+        // Start execution to put it in a stable RUNNING state
+        statusMonitoringService.updateProgress(executionId, 2, 0, "initialization", new HashMap<>());
+        
+        // Act 1: Get status and ETag (execution is now RUNNING)
+        ExecutionStatusResponse status = statusMonitoringService.getExecutionStatus(executionId);
+        String etag = statusMonitoringService.generateETag(status);
+        
+        // Act 2: Request with matching ETag (should return 304)
+        mockMvc.perform(get("/api/v1/executions/{executionId}/status", executionId)
+                .header("If-None-Match", etag))
+                .andExpect(status().isNotModified());
+        
+        // Act 3: Update progress (changes ETag)
+        statusMonitoringService.updateProgress(executionId, 2, 1, "task_1", new HashMap<>());
+        ExecutionStatusResponse updatedStatus = statusMonitoringService.getExecutionStatus(executionId);
+        String newEtag = statusMonitoringService.generateETag(updatedStatus);
+        
+        // Verify ETag changed
+        assertNotEquals(etag, newEtag);
+        
+        // Act 4: Request with old ETag (should return 202 with new data)
+        mockMvc.perform(get("/api/v1/executions/{executionId}/status", executionId)
+                .header("If-None-Match", etag))
+                .andExpect(status().isAccepted()) // Running status
+                .andExpect(header().string("ETag", newEtag))
+                .andExpect(jsonPath("$.progress.completedNodes").value(1));
+    }
+    
+    @Test
+    void testExecutionMetrics_Success() throws Exception {
+        // Arrange - Create multiple executions with different statuses
+        String[] executionIds = {"exec_1", "exec_2", "exec_3", "exec_4"};
+        
+        // Track executions
+        for (String id : executionIds) {
+            statusMonitoringService.trackExecution(id, "prompt", new HashMap<>());
+        }
+        
+        // Complete some executions
+        statusMonitoringService.completeExecution(executionIds[0], true, 
+            PromptExecutionResponse.success(executionIds[0], "Success", new HashMap<>()));
+        statusMonitoringService.completeExecution(executionIds[1], true, 
+            PromptExecutionResponse.success(executionIds[1], "Success", new HashMap<>()));
+        statusMonitoringService.completeExecution(executionIds[2], false, 
+            PromptExecutionResponse.failure(executionIds[2], "Failed", "ERROR"));
+        // Leave executionIds[3] running
+        
+        // Mock Redis responses for metrics calculation
+        when(redisTemplate.keys("execution_status:*")).thenReturn(
+            java.util.Set.of("execution_status:exec_1", "execution_status:exec_2", 
+                           "execution_status:exec_3", "execution_status:exec_4"));
+        
+        when(valueOperations.get("execution_status:exec_1")).thenReturn(
+            ExecutionStatusResponse.completed(executionIds[0], 
+                PromptExecutionResponse.success(executionIds[0], "Success", new HashMap<>())));
+        when(valueOperations.get("execution_status:exec_2")).thenReturn(
+            ExecutionStatusResponse.completed(executionIds[1], 
+                PromptExecutionResponse.success(executionIds[1], "Success", new HashMap<>())));
+        when(valueOperations.get("execution_status:exec_3")).thenReturn(
+            ExecutionStatusResponse.failed(executionIds[2], 
+                PromptExecutionResponse.failure(executionIds[2], "Failed", "ERROR")));
+        when(valueOperations.get("execution_status:exec_4")).thenReturn(
+            ExecutionStatusResponse.running(executionIds[3], 
+                new ExecutionStatusResponse.ExecutionProgress(2, 1, "task_1")));
+        
+        // Act: Get metrics via API
+        mockMvc.perform(get("/api/v1/executions/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalExecutions").value(4))
+                .andExpect(jsonPath("$.completedExecutions").value(2))
+                .andExpect(jsonPath("$.failedExecutions").value(1))
+                .andExpect(jsonPath("$.runningExecutions").value(1))
+                .andExpect(jsonPath("$.successRate").value(50.0))
+                .andExpect(jsonPath("$.executionsByHour").exists());
+    }
+    
+    @Test
+    void testExecutionTrace_Success() throws Exception {
+        // Arrange
+        String executionId = "exec_trace_test";
+        Map<String, Object> mockTrace = new HashMap<>();
+        mockTrace.put("executionId", executionId);
+        mockTrace.put("startTime", "2024-01-15T10:30:00Z");
+        mockTrace.put("endTime", "2024-01-15T10:30:05Z");
+        mockTrace.put("nodeExecutions", java.util.List.of(
+            Map.of("nodeId", "task_1", "status", "SUCCESS", "duration", 2500),
+            Map.of("nodeId", "task_2", "status", "SUCCESS", "duration", 1800)
+        ));
+        
+        when(valueOperations.get("execution_trace:" + executionId)).thenReturn(mockTrace);
+        
+        // Act & Assert
+        mockMvc.perform(get("/api/v1/executions/{executionId}/trace", executionId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.executionId").value(executionId))
+                .andExpect(jsonPath("$.nodeExecutions").isArray())
+                .andExpect(jsonPath("$.nodeExecutions.length()").value(2))
+                .andExpect(jsonPath("$.nodeExecutions[0].nodeId").value("task_1"))
+                .andExpect(jsonPath("$.nodeExecutions[0].status").value("SUCCESS"))
+                .andExpect(jsonPath("$.nodeExecutions[1].nodeId").value("task_2"));
+        
+        verify(valueOperations).get("execution_trace:" + executionId);
+    }
+    
+    @Test
+    void testHealthCheck_Success() throws Exception {
+        // Act & Assert
+        mockMvc.perform(get("/api/v1/executions/health"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("healthy"))
+                .andExpect(jsonPath("$.service").value("StatusMonitoringService"))
+                .andExpect(jsonPath("$.components").exists())
+                .andExpect(jsonPath("$.components.redis").exists())
+                .andExpect(jsonPath("$.components.websocket").exists())
+                .andExpect(jsonPath("$.metrics").exists())
+                .andExpect(jsonPath("$.metrics.activeExecutions").exists())
+                .andExpect(jsonPath("$.metrics.totalExecutions").exists())
+                .andExpect(jsonPath("$.metrics.webhookSubscriptions").exists());
+    }
+}

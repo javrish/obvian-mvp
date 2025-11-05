@@ -1,0 +1,550 @@
+package core;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.DisplayName;
+import static org.junit.jupiter.api.Assertions.*;
+
+import java.util.List;
+import java.util.Map;
+
+@Tag("fast")
+@Tag("unit")
+class PromptParserTest {
+    
+    private PromptParser parser;
+    
+    @BeforeEach
+    void setUp() {
+        parser = new PromptParser();
+    }
+    
+    @AfterEach
+    void tearDown() {
+        // Reset parser reference for cleanup
+        parser = null;
+    }
+    
+    @Test
+    @DisplayName("Should throw exception for null prompt")
+    void testNullPrompt() {
+        assertThrows(IllegalArgumentException.class, () -> parser.parsePrompt(null));
+    }
+    
+    @Test
+    @DisplayName("Should throw exception for empty prompt")
+    void testEmptyPrompt() {
+        assertThrows(IllegalArgumentException.class, () -> parser.parsePrompt(""));
+        assertThrows(IllegalArgumentException.class, () -> parser.parsePrompt("   "));
+    }
+    
+    @Test
+    @DisplayName("Should parse basic email sending prompt")
+    void testBasicEmailParsing() {
+        String prompt = "Send an email to john@example.com saying Hello world";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("send_email", intent.getAction());
+        assertEquals("john@example.com", intent.getParameters().get("recipient"));
+        assertEquals("Hello world", intent.getParameters().get("body"));
+        assertEquals("Message from Obvian", intent.getParameters().get("subject"));
+        assertEquals(prompt, intent.getOriginalPrompt());
+    }
+    
+    @Test
+    @DisplayName("Should parse email without message content")
+    void testEmailWithoutMessage() {
+        String prompt = "Send email to alice@test.org";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("send_email", intent.getAction());
+        assertEquals("alice@test.org", intent.getParameters().get("recipient"));
+        assertEquals("Hello from Obvian!", intent.getParameters().get("body"));
+    }
+    
+    @Test
+    @DisplayName("Should parse email with colon separator")
+    void testEmailWithColon() {
+        String prompt = "Send an email to bob@company.com saying: The project is complete";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("send_email", intent.getAction());
+        assertEquals("bob@company.com", intent.getParameters().get("recipient"));
+        assertEquals("The project is complete", intent.getParameters().get("body"));
+    }
+    
+    @Test
+    @DisplayName("Should parse file creation with content")
+    void testFileCreationWithContent() {
+        String prompt = "Create a file called report.txt with content: Project completed successfully";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("create_file", intent.getAction());
+        assertEquals("report.txt", intent.getParameters().get("filename"));
+        assertEquals("Project completed successfully", intent.getParameters().get("content"));
+    }
+    
+    @Test
+    @DisplayName("Should parse file creation without content")
+    void testFileCreationWithoutContent() {
+        String prompt = "Create file named data.json";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("create_file", intent.getAction());
+        assertEquals("data.json", intent.getParameters().get("filename"));
+        assertEquals("", intent.getParameters().get("content"));
+    }
+    
+    @Test
+    @DisplayName("Should parse reminder with time")
+    void testReminderWithTime() {
+        String prompt = "Set a reminder to call the client at 3pm";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("set_reminder", intent.getAction());
+        assertEquals("call the client", intent.getParameters().get("task"));
+        assertEquals("3pm", intent.getParameters().get("time"));
+    }
+    
+    @Test
+    @DisplayName("Should parse reminder without time")
+    void testReminderWithoutTime() {
+        String prompt = "Remind me to buy groceries";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("set_reminder", intent.getAction());
+        assertEquals("buy groceries", intent.getParameters().get("task"));
+        assertEquals("now", intent.getParameters().get("time"));
+    }
+    
+    @Test
+    @DisplayName("Should handle case insensitive prompts")
+    void testCaseInsensitive() {
+        String prompt = "SEND EMAIL TO TEST@EXAMPLE.COM SAYING HELLO";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("send_email", intent.getAction());
+        assertEquals("TEST@EXAMPLE.COM", intent.getParameters().get("recipient"));
+        assertEquals("HELLO", intent.getParameters().get("body"));
+    }
+    
+    @Test
+    @DisplayName("Should fallback to generic action for unknown patterns")
+    void testGenericFallback() {
+        String prompt = "Do something complex that doesn't match any pattern";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("generic", intent.getAction());
+        assertEquals(prompt, intent.getParameters().get("message"));
+    }
+    
+    @Test
+    @DisplayName("Should extract email entities")
+    void testExtractEmailEntities() {
+        String prompt = "Send emails to john@test.com and alice@example.org";
+        Map<String, List<String>> entities = parser.extractEntities(prompt);
+        
+        assertTrue(entities.containsKey("emails"));
+        List<String> emails = entities.get("emails");
+        assertEquals(2, emails.size());
+        assertTrue(emails.contains("john@test.com"));
+        assertTrue(emails.contains("alice@example.org"));
+    }
+    
+    @Test
+    @DisplayName("Should extract filename entities")
+    void testExtractFilenameEntities() {
+        String prompt = "Create files report.pdf and data.json with content";
+        Map<String, List<String>> entities = parser.extractEntities(prompt);
+        
+        assertTrue(entities.containsKey("filenames"));
+        List<String> filenames = entities.get("filenames");
+        assertEquals(2, filenames.size());
+        assertTrue(filenames.contains("report.pdf"));
+        assertTrue(filenames.contains("data.json"));
+    }
+    
+    @Test
+    @DisplayName("Should return empty entities for null prompt")
+    void testExtractEntitiesNullPrompt() {
+        Map<String, List<String>> entities = parser.extractEntities(null);
+        assertTrue(entities.isEmpty());
+    }
+    
+    @Test
+    @DisplayName("Should identify known patterns")
+    void testIsKnownPattern() {
+        assertTrue(parser.isKnownPattern("Send email to test@example.com"));
+        assertTrue(parser.isKnownPattern("Create file called test.txt"));
+        assertTrue(parser.isKnownPattern("Set reminder to call mom"));
+        assertFalse(parser.isKnownPattern("Unknown command pattern"));
+        assertFalse(parser.isKnownPattern(null));
+        assertFalse(parser.isKnownPattern(""));
+    }
+    
+    @Test
+    @DisplayName("Should return supported actions")
+    void testGetSupportedActions() {
+        List<String> actions = parser.getSupportedActions();
+        assertEquals(4, actions.size());
+        assertTrue(actions.contains("send_email"));
+        assertTrue(actions.contains("create_file"));
+        assertTrue(actions.contains("set_reminder"));
+        assertTrue(actions.contains("generic"));
+    }
+    
+    @Test
+    @DisplayName("Should handle multiline content in email")
+    void testMultilineEmailContent() {
+        String prompt = "Send email to test@example.com saying: Line 1\nLine 2\nLine 3";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("send_email", intent.getAction());
+        assertEquals("test@example.com", intent.getParameters().get("recipient"));
+        assertEquals("Line 1\nLine 2\nLine 3", intent.getParameters().get("body"));
+    }
+    
+    @Test
+    @DisplayName("Should handle multiline content in file creation")
+    void testMultilineFileContent() {
+        String prompt = "Create file called notes.txt with content: First line\nSecond line\nThird line";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("create_file", intent.getAction());
+        assertEquals("notes.txt", intent.getParameters().get("filename"));
+        assertEquals("First line\nSecond line\nThird line", intent.getParameters().get("content"));
+    }
+    
+    @Test
+    @DisplayName("Should handle edge cases in email addresses")
+    void testEmailEdgeCases() {
+        String prompt = "Send email to user.name+tag@sub.domain.co.uk saying test";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        assertEquals("send_email", intent.getAction());
+        assertEquals("user.name+tag@sub.domain.co.uk", intent.getParameters().get("recipient"));
+    }
+    
+    @Test
+    @DisplayName("Should handle various file extensions")
+    void testVariousFileExtensions() {
+        String[] prompts = {
+            "Create file test.java",
+            "Create file data.xlsx", 
+            "Create file image.png",
+            "Create file script.sh"
+        };
+        
+        for (String prompt : prompts) {
+            PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+            assertEquals("create_file", intent.getAction());
+        }
+    }
+    
+    @Test
+    @DisplayName("Should preserve original prompt in ParsedIntent")
+    void testOriginalPromptPreservation() {
+        String originalPrompt = "Send email to test@example.com saying hello world";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(originalPrompt);
+        
+        assertEquals(originalPrompt, intent.getOriginalPrompt());
+    }
+    
+    @Test
+    @DisplayName("Should handle ParsedIntent toString")
+    void testParsedIntentToString() {
+        String prompt = "Send email to test@example.com";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        
+        String toString = intent.toString();
+        assertTrue(toString.contains("send_email"));
+        assertTrue(toString.contains("ParsedIntent"));
+    }
+    
+    // ===== COMPOUND PROMPT TESTS =====
+    
+    @Test
+    @DisplayName("Should detect compound prompts with 'then'")
+    void testDetectCompoundPromptWithThen() {
+        String prompt = "Create file report.txt with content 'Hello', then send email to test@example.com";
+        assertTrue(parser.isCompoundPrompt(prompt));
+    }
+    
+    @Test
+    @DisplayName("Should detect compound prompts with 'and then'")
+    void testDetectCompoundPromptWithAndThen() {
+        String prompt = "Set reminder to call client and then send email to team@company.com";
+        assertTrue(parser.isCompoundPrompt(prompt));
+    }
+    
+    @Test
+    @DisplayName("Should detect compound prompts with various conjunctions")
+    void testDetectCompoundPromptVariousConjunctions() {
+        String[] compoundPrompts = {
+            "Do A then do B",
+            "Do A and then do B", 
+            "Do A, then do B",
+            "Do A; then do B",
+            "Do A after that do B",
+            "Do A next do B",
+            "Do A afterwards do B",
+            "Do A followed by B"
+        };
+        
+        for (String prompt : compoundPrompts) {
+            assertTrue(parser.isCompoundPrompt(prompt), "Should detect compound prompt: " + prompt);
+        }
+    }
+    
+    @Test
+    @DisplayName("Should not detect single prompts as compound")
+    void testNotDetectSinglePromptAsCompound() {
+        String[] singlePrompts = {
+            "Send email to test@example.com",
+            "Create file report.txt",
+            "Set reminder to call client",
+            "Do something simple"
+        };
+        
+        for (String prompt : singlePrompts) {
+            assertFalse(parser.isCompoundPrompt(prompt), "Should not detect as compound: " + prompt);
+        }
+    }
+    
+    @Test
+    @DisplayName("Should parse simple compound prompt with file creation and email")
+    void testParseSimpleCompoundPrompt() {
+        String prompt = "Create file report.txt with content 'Progress update', then send email to manager@company.com saying 'Report ready'";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertTrue(result.isCompound());
+        assertEquals(2, result.getIntentCount());
+        assertEquals(prompt, result.getOriginalPrompt());
+        
+        // First intent - file creation
+        PromptParser.ParsedIntent firstIntent = result.getIntents().get(0);
+        assertEquals("create_file", firstIntent.getAction());
+        assertEquals(0, firstIntent.getSequenceOrder());
+        assertEquals("report.txt", firstIntent.getParameters().get("filename"));
+        assertEquals("Progress update", firstIntent.getParameters().get("content"));
+        
+        // Second intent - email
+        PromptParser.ParsedIntent secondIntent = result.getIntents().get(1);
+        assertEquals("send_email", secondIntent.getAction());
+        assertEquals(1, secondIntent.getSequenceOrder());
+        assertEquals("manager@company.com", secondIntent.getParameters().get("recipient"));
+        assertEquals("Report ready", secondIntent.getParameters().get("body"));
+    }
+    
+    @Test
+    @DisplayName("Should parse compound prompt with three actions")
+    void testParseThreeActionCompoundPrompt() {
+        String prompt = "Create file data.json, then set reminder to review at 3pm, then send email to team@company.com";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertTrue(result.isCompound());
+        assertEquals(3, result.getIntentCount());
+        
+        // Verify sequence orders
+        assertEquals(0, result.getIntents().get(0).getSequenceOrder());
+        assertEquals(1, result.getIntents().get(1).getSequenceOrder());
+        assertEquals(2, result.getIntents().get(2).getSequenceOrder());
+        
+        // Verify actions
+        assertEquals("create_file", result.getIntents().get(0).getAction());
+        assertEquals("set_reminder", result.getIntents().get(1).getAction());
+        assertEquals("send_email", result.getIntents().get(2).getAction());
+    }
+    
+    @Test
+    @DisplayName("Should handle compound prompt with mixed known and unknown patterns")
+    void testCompoundPromptMixedPatterns() {
+        String prompt = "Create file test.txt, then do something unknown, then send email to user@test.com";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertTrue(result.isCompound());
+        assertEquals(3, result.getIntentCount());
+        
+        assertEquals("create_file", result.getIntents().get(0).getAction());
+        assertEquals("generic", result.getIntents().get(1).getAction());
+        assertEquals("send_email", result.getIntents().get(2).getAction());
+        
+        // Check generic action parameters
+        assertEquals("do something unknown", result.getIntents().get(1).getParameters().get("message"));
+    }
+    
+    @Test
+    @DisplayName("Should parse single prompt as non-compound result")
+    void testParseSinglePromptAsNonCompound() {
+        String prompt = "Send email to test@example.com saying hello";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertFalse(result.isCompound());
+        assertEquals(1, result.getIntentCount());
+        assertEquals("send_email", result.getPrimaryIntent().getAction());
+        assertEquals(0, result.getPrimaryIntent().getSequenceOrder());
+    }
+    
+    @Test
+    @DisplayName("Should maintain backward compatibility with parsePrompt method")
+    void testBackwardCompatibilityParsePrompt() {
+        String compoundPrompt = "Create file test.txt, then send email to user@test.com";
+        
+        // Old method should return first intent
+        PromptParser.ParsedIntent singleResult = parser.parsePrompt(compoundPrompt);
+        assertEquals("create_file", singleResult.getAction());
+        assertEquals(0, singleResult.getSequenceOrder());
+        
+        // New method should return full compound result
+        PromptParser.CompoundParseResult compoundResult = parser.parseCompoundPrompt(compoundPrompt);
+        assertTrue(compoundResult.isCompound());
+        assertEquals(2, compoundResult.getIntentCount());
+        
+        // Primary intent should match single result
+        assertEquals(singleResult.getAction(), compoundResult.getPrimaryIntent().getAction());
+    }
+    
+    @Test
+    @DisplayName("Should extract conjunction words from prompt")
+    void testExtractConjunctionWords() {
+        String prompt = "Do A then do B and then do C, then finish";
+        List<String> conjunctions = parser.getConjunctionWords(prompt);
+        
+        assertEquals(3, conjunctions.size());
+        assertTrue(conjunctions.contains("then"));
+        assertTrue(conjunctions.contains("and then"));
+        assertTrue(conjunctions.contains(", then"));
+    }
+    
+    @Test
+    @DisplayName("Should handle empty conjunction words for single prompts")
+    void testEmptyConjunctionWordsForSinglePrompts() {
+        String prompt = "Send email to test@example.com";
+        List<String> conjunctions = parser.getConjunctionWords(prompt);
+        
+        assertTrue(conjunctions.isEmpty());
+    }
+    
+    @Test
+    @DisplayName("Should handle case insensitive compound prompts")
+    void testCaseInsensitiveCompoundPrompts() {
+        String prompt = "CREATE FILE TEST.TXT THEN SEND EMAIL TO USER@TEST.COM";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertTrue(result.isCompound());
+        assertEquals(2, result.getIntentCount());
+        assertEquals("create_file", result.getIntents().get(0).getAction());
+        assertEquals("send_email", result.getIntents().get(1).getAction());
+    }
+    
+    @Test
+    @DisplayName("Should handle compound prompt with whitespace variations")
+    void testCompoundPromptWhitespaceVariations() {
+        String prompt = "Create file test.txt   ,    then    send email to user@test.com";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertTrue(result.isCompound());
+        assertEquals(2, result.getIntentCount());
+        
+        // Verify parameters are properly trimmed
+        assertEquals("test.txt", result.getIntents().get(0).getParameters().get("filename"));
+        assertEquals("user@test.com", result.getIntents().get(1).getParameters().get("recipient"));
+    }
+    
+    @Test
+    @DisplayName("Should handle compound prompt with empty segments")
+    void testCompoundPromptEmptySegments() {
+        String prompt = "Create file test.txt then  then send email to user@test.com";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        assertTrue(result.isCompound());
+        assertEquals(2, result.getIntentCount()); // Empty segments should be filtered out
+        assertEquals("create_file", result.getIntents().get(0).getAction());
+        assertEquals("send_email", result.getIntents().get(1).getAction());
+    }
+    
+    @Test
+    @DisplayName("Should handle CompoundParseResult toString")
+    void testCompoundParseResultToString() {
+        String prompt = "Create file test.txt then send email to user@test.com";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        
+        String toString = result.toString();
+        assertTrue(toString.contains("CompoundParseResult"));
+        assertTrue(toString.contains("isCompound=true"));
+        assertTrue(toString.contains("intentCount=2"));
+    }
+    
+    @Test
+    @DisplayName("Should handle null and empty prompts in compound parsing")
+    void testCompoundParsingNullAndEmpty() {
+        assertThrows(IllegalArgumentException.class, () -> parser.parseCompoundPrompt(null));
+        assertThrows(IllegalArgumentException.class, () -> parser.parseCompoundPrompt(""));
+        assertThrows(IllegalArgumentException.class, () -> parser.parseCompoundPrompt("   "));
+    }
+    
+    @Test
+    @DisplayName("Should handle conjunction detection with null and empty prompts")
+    void testConjunctionDetectionNullAndEmpty() {
+        assertFalse(parser.isCompoundPrompt(null));
+        assertFalse(parser.isCompoundPrompt(""));
+        assertFalse(parser.isCompoundPrompt("   "));
+        
+        assertTrue(parser.getConjunctionWords(null).isEmpty());
+        assertTrue(parser.getConjunctionWords("").isEmpty());
+        assertTrue(parser.getConjunctionWords("   ").isEmpty());
+    }
+
+    @Test
+    @DisplayName("Should parse prompt with memory reference: last file")
+    void testMemoryReferenceLastFile() {
+        String prompt = "Email the last file I created to john@example.com";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        assertEquals("send_email", intent.getAction());
+        assertEquals("last_file", intent.getParameters().get("memoryRef"));
+        assertEquals("john@example.com", intent.getParameters().get("recipient"));
+    }
+
+    @Test
+    @DisplayName("Should parse prompt with memory reference: previous reminder")
+    void testMemoryReferencePreviousReminder() {
+        String prompt = "Send the previous reminder to John";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        assertEquals("send_email", intent.getAction()); // fallback to email intent if pattern matches
+        assertEquals("previous_reminder", intent.getParameters().get("memoryRef"));
+    }
+
+    @Test
+    @DisplayName("Should parse prompt with memory reference: recent message")
+    void testMemoryReferenceRecentMessage() {
+        String prompt = "Share the recent message";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        assertEquals("generic", intent.getAction());
+        assertEquals("recent_message", intent.getParameters().get("memoryRef"));
+    }
+
+    @Test
+    @DisplayName("Should not add memoryRef for prompts without memory reference")
+    void testNoMemoryReference() {
+        String prompt = "Send email to alice@example.com";
+        PromptParser.ParsedIntent intent = parser.parsePrompt(prompt);
+        assertEquals("send_email", intent.getAction());
+        assertNull(intent.getParameters().get("memoryRef"));
+    }
+
+    @Test
+    @DisplayName("Should handle ambiguous memory phrases gracefully")
+    void testAmbiguousMemoryReference() {
+        String prompt = "Send the last file and the previous reminder";
+        PromptParser.CompoundParseResult result = parser.parseCompoundPrompt(prompt);
+        assertEquals(1, result.getIntentCount());
+        PromptParser.ParsedIntent intent = result.getPrimaryIntent();
+        // Should pick up at least one memoryRef (last_file or previous_reminder)
+        assertTrue(
+            "last_file".equals(intent.getParameters().get("memoryRef")) ||
+            "previous_reminder".equals(intent.getParameters().get("memoryRef"))
+        );
+    }
+}

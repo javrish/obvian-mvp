@@ -1,0 +1,227 @@
+package tests.api.service;
+
+import api.model.PromptExecutionRequest;
+import api.model.PromptExecutionResponse;
+import core.*;
+import memory.MemoryStore;
+import memory.ExecutionMemoryEntry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Tag;
+
+import java.util.*;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Basic service layer validation tests
+ * Focuses on testing that the service layer compiles and basic models work correctly
+ */
+@DisplayName("Prompt Execution Service Tests")
+@Tag("fast")
+@Tag("api")
+class PromptExecutionServiceTest {
+
+    private PromptExecutionRequest testRequest;
+    private MemoryStore memoryStore;
+
+    @BeforeEach
+    void setUp() {
+        // Create test request
+        testRequest = new PromptExecutionRequest();
+        testRequest.setPrompt("Send an email to test@example.com");
+        testRequest.setDryRun(false);
+        testRequest.setAsync(false);
+        testRequest.setTrace(false);
+        
+        // Create memory store
+        memoryStore = new MemoryStore();
+    }
+
+    @Test
+    @DisplayName("Should validate PromptExecutionRequest model")
+    void shouldValidatePromptExecutionRequestModel() {
+        // Test model creation and basic validation
+        assertThat(testRequest).isNotNull();
+        assertThat(testRequest.getPrompt()).isEqualTo("Send an email to test@example.com");
+        assertThat(testRequest.isDryRun()).isFalse();
+        assertThat(testRequest.isAsync()).isFalse();
+        assertThat(testRequest.isTrace()).isFalse();
+    }
+
+    @Test
+    @DisplayName("Should validate PromptExecutionResponse model")
+    void shouldValidatePromptExecutionResponseModel() {
+        // Test response model creation
+        String executionId = "exec_test123";
+        Map<String, Object> data = Map.of("result", "success");
+        
+        PromptExecutionResponse response = PromptExecutionResponse.success(executionId, "Test completed", data);
+        
+        assertThat(response).isNotNull();
+        assertThat(response.getExecutionId()).isEqualTo(executionId);
+        assertThat(response.isSuccess()).isTrue();
+        assertThat(response.getMessage()).isEqualTo("Test completed");
+        assertThat(response.getData()).isEqualTo(data);
+    }
+
+    @Test
+    @DisplayName("Should validate PromptExecutionResponse failure model")
+    void shouldValidatePromptExecutionResponseFailureModel() {
+        // Test failure response model
+        String executionId = "exec_test123";
+        String message = "Execution failed";
+        String errorType = "VALIDATION_ERROR";
+        
+        PromptExecutionResponse response = PromptExecutionResponse.failure(executionId, message, errorType);
+        
+        assertThat(response).isNotNull();
+        assertThat(response.getExecutionId()).isEqualTo(executionId);
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.getMessage()).isEqualTo(message);
+        assertThat(response.getErrorType()).isEqualTo(errorType);
+    }
+
+    @Test
+    @DisplayName("Should validate empty prompt handling")
+    void shouldValidateEmptyPromptHandling() {
+        // Test basic validation logic
+        testRequest.setPrompt("");
+        
+        assertThat(testRequest.getPrompt()).isEmpty();
+        
+        // Simulate validation logic
+        boolean isValid = testRequest.getPrompt() != null && !testRequest.getPrompt().trim().isEmpty();
+        assertThat(isValid).isFalse();
+    }
+
+    @Test
+    @DisplayName("Should validate null prompt handling")
+    void shouldValidateNullPromptHandling() {
+        // Test null validation
+        testRequest.setPrompt(null);
+        
+        assertThat(testRequest.getPrompt()).isNull();
+        
+        // Simulate validation logic
+        boolean isValid = testRequest.getPrompt() != null && !testRequest.getPrompt().trim().isEmpty();
+        assertThat(isValid).isFalse();
+    }
+
+    @Test
+    @DisplayName("Should validate whitespace prompt handling")
+    void shouldValidateWhitespacePromptHandling() {
+        // Test whitespace validation
+        testRequest.setPrompt("   \t\n   ");
+        
+        assertThat(testRequest.getPrompt()).isNotNull();
+        assertThat(testRequest.getPrompt().trim()).isEmpty();
+        
+        // Simulate validation logic
+        boolean isValid = testRequest.getPrompt() != null && !testRequest.getPrompt().trim().isEmpty();
+        assertThat(isValid).isFalse();
+    }
+
+    @Test
+    @DisplayName("Should validate dry run configuration")
+    void shouldValidateDryRunConfiguration() {
+        // Test dry run mode
+        testRequest.setDryRun(true);
+        
+        assertThat(testRequest.isDryRun()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Should validate async configuration")
+    void shouldValidateAsyncConfiguration() {
+        // Test async mode
+        testRequest.setAsync(true);
+        
+        assertThat(testRequest.isAsync()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Should validate trace configuration")
+    void shouldValidateTraceConfiguration() {
+        // Test trace mode
+        testRequest.setTrace(true);
+        
+        assertThat(testRequest.isTrace()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Should validate timeout configuration")
+    void shouldValidateTimeoutConfiguration() {
+        // Test timeout setting
+        testRequest.setTimeoutMs(5000L);
+        
+        assertThat(testRequest.getTimeoutMs()).isEqualTo(5000L);
+    }
+
+    @Test
+    @DisplayName("Should validate context configuration")
+    void shouldValidateContextConfiguration() {
+        // Test context setting
+        Map<String, Object> context = Map.of("userId", "user123", "sessionId", "session456");
+        testRequest.setContext(context);
+        
+        assertThat(testRequest.getContext()).isEqualTo(context);
+        assertThat(testRequest.getContext()).containsKey("userId");
+        assertThat(testRequest.getContext()).containsKey("sessionId");
+    }
+
+    @Test
+    @DisplayName("Should validate user ID configuration")
+    void shouldValidateUserIdConfiguration() {
+        // Test user ID setting
+        testRequest.setUserId("user123");
+        
+        assertThat(testRequest.getUserId()).isEqualTo("user123");
+    }
+
+    @Test
+    @DisplayName("Should validate memory store functionality")
+    void shouldValidateMemoryStoreFunctionality() {
+        // Test that memory store can be created and basic operations work
+        assertThat(memoryStore).isNotNull();
+        
+        // Test basic memory operations
+        List<ExecutionMemoryEntry> executions = memoryStore.getAllExecutions();
+        assertThat(executions).isNotNull();
+        assertThat(executions).isEmpty(); // Should be empty initially
+    }
+
+    @Test
+    @DisplayName("Should validate execution ID generation logic")
+    void shouldValidateExecutionIdGenerationLogic() {
+        // Test execution ID generation pattern
+        String prefix = "exec_";
+        String generatedId = prefix + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+        
+        assertThat(generatedId).startsWith(prefix);
+        assertThat(generatedId.length()).isEqualTo(prefix.length() + 12);
+    }
+
+    @Test
+    @DisplayName("Should validate context merging logic")
+    void shouldValidateContextMergingLogic() {
+        // Test context merging behavior
+        Map<String, Object> userContext = new HashMap<>();
+        userContext.put("userId", "user123");
+        userContext.put("environment", "test");
+        
+        Map<String, Object> requestContext = new HashMap<>();
+        requestContext.put("sessionId", "session456");
+        requestContext.put("environment", "prod");
+        
+        // Simulate merging logic (request overrides user)
+        Map<String, Object> merged = new HashMap<>(userContext);
+        merged.putAll(requestContext);
+        
+        assertThat(merged).containsKey("userId");
+        assertThat(merged).containsKey("sessionId");
+        assertThat(merged.get("environment")).isEqualTo("prod"); // Request context should override
+        assertThat(merged.get("userId")).isEqualTo("user123");
+    }
+}

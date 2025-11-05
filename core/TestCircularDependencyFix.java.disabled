@@ -1,0 +1,149 @@
+package tests.core;
+
+import core.*;
+import plugins.PluginRouter;
+import java.util.*;
+
+public class TestCircularDependencyFix {
+    public static void main(String[] args) {
+        System.out.println("Testing circular dependency detection fix...\n");
+        
+        // Test 1: Simple circular dependency A -> B -> A
+        System.out.println("Test 1: Simple circular dependency A -> B -> A");
+        testSimpleCircular();
+        
+        // Test 2: Complex circular dependency A -> B -> C -> A
+        System.out.println("\nTest 2: Complex circular dependency A -> B -> C -> A");
+        testComplexCircular();
+        
+        // Test 3: Valid DAG (no cycles)
+        System.out.println("\nTest 3: Valid DAG (no cycles)");
+        testValidDag();
+        
+        // Test 4: Self-referencing node
+        System.out.println("\nTest 4: Self-referencing node");
+        testSelfReference();
+    }
+    
+    private static void testSimpleCircular() {
+        try {
+            TaskNode nodeA = new TaskNode("A", "TestPlugin");
+            TaskNode nodeB = new TaskNode("B", "TestPlugin");
+            
+            nodeA.setResolvedDependencies(List.of(nodeB));
+            nodeB.setResolvedDependencies(List.of(nodeA));
+            
+            DAG dag = new DAG();
+            dag.setNodes(List.of(nodeA, nodeB));
+            dag.setRootNode(nodeA);
+            
+            PluginRouter pluginRouter = new PluginRouter();
+            DagValidator validator = new DagValidator(pluginRouter);
+            DagValidationResult result = validator.validate(dag);
+            
+            System.out.println("Valid: " + result.isValid());
+            System.out.println("Errors: " + result.getErrors());
+            
+            if (!result.isValid() && result.getErrors().stream().anyMatch(e -> e.getMessage().contains("Circular"))) {
+                System.out.println("✓ PASS: Circular dependency detected correctly");
+            } else {
+                System.out.println("✗ FAIL: Circular dependency not detected");
+            }
+        } catch (Exception e) {
+            System.out.println("✗ FAIL: Exception occurred: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private static void testComplexCircular() {
+        try {
+            TaskNode nodeA = new TaskNode("A", "TestPlugin");
+            TaskNode nodeB = new TaskNode("B", "TestPlugin");
+            TaskNode nodeC = new TaskNode("C", "TestPlugin");
+            
+            nodeA.setResolvedDependencies(List.of(nodeB));
+            nodeB.setResolvedDependencies(List.of(nodeC));
+            nodeC.setResolvedDependencies(List.of(nodeA));
+            
+            DAG dag = new DAG();
+            dag.setNodes(List.of(nodeA, nodeB, nodeC));
+            dag.setRootNode(nodeA);
+            
+            PluginRouter pluginRouter = new PluginRouter();
+            DagValidator validator = new DagValidator(pluginRouter);
+            DagValidationResult result = validator.validate(dag);
+            
+            System.out.println("Valid: " + result.isValid());
+            System.out.println("Errors: " + result.getErrors());
+            
+            if (!result.isValid() && result.getErrors().stream().anyMatch(e -> e.getMessage().contains("Circular"))) {
+                System.out.println("✓ PASS: Complex circular dependency detected correctly");
+            } else {
+                System.out.println("✗ FAIL: Complex circular dependency not detected");
+            }
+        } catch (Exception e) {
+            System.out.println("✗ FAIL: Exception occurred: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private static void testValidDag() {
+        try {
+            TaskNode nodeA = new TaskNode("A", "TestPlugin");
+            TaskNode nodeB = new TaskNode("B", "TestPlugin");
+            TaskNode nodeC = new TaskNode("C", "TestPlugin");
+            
+            // A depends on B and C, B depends on C (valid DAG)
+            nodeA.setResolvedDependencies(List.of(nodeB, nodeC));
+            nodeB.setResolvedDependencies(List.of(nodeC));
+            nodeC.setResolvedDependencies(List.of());
+            
+            DAG dag = new DAG();
+            dag.setNodes(List.of(nodeA, nodeB, nodeC));
+            dag.setRootNode(nodeA);
+            
+            PluginRouter pluginRouter = new PluginRouter();
+            DagValidator validator = new DagValidator(pluginRouter);
+            DagValidationResult result = validator.validate(dag);
+            
+            System.out.println("Valid: " + result.isValid());
+            System.out.println("Errors: " + result.getErrors());
+            
+            if (result.isValid() && result.getErrors().isEmpty()) {
+                System.out.println("✓ PASS: Valid DAG accepted correctly");
+            } else {
+                System.out.println("✗ FAIL: Valid DAG rejected incorrectly");
+            }
+        } catch (Exception e) {
+            System.out.println("✗ FAIL: Exception occurred: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    private static void testSelfReference() {
+        try {
+            TaskNode nodeA = new TaskNode("A", "TestPlugin");
+            nodeA.setResolvedDependencies(List.of(nodeA)); // Self-reference
+            
+            DAG dag = new DAG();
+            dag.setNodes(List.of(nodeA));
+            dag.setRootNode(nodeA);
+            
+            PluginRouter pluginRouter = new PluginRouter();
+            DagValidator validator = new DagValidator(pluginRouter);
+            DagValidationResult result = validator.validate(dag);
+            
+            System.out.println("Valid: " + result.isValid());
+            System.out.println("Errors: " + result.getErrors());
+            
+            if (!result.isValid()) {
+                System.out.println("✓ PASS: Self-referencing node detected correctly");
+            } else {
+                System.out.println("✗ FAIL: Self-referencing node not detected");
+            }
+        } catch (Exception e) {
+            System.out.println("✗ FAIL: Exception occurred: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+}

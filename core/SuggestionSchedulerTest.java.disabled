@@ -1,0 +1,289 @@
+package tests.core;
+
+import core.*;
+import core.SuggestionTypes.*;
+import core.PatternTypes.*;
+import core.OpportunityTypes.*;
+import memory.MemoryStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Comprehensive tests for SuggestionScheduler functionality
+ */
+public class SuggestionSchedulerTest {
+    
+    @Mock private PatternAnalyzer patternAnalyzer;
+    @Mock private OpportunityDetector opportunityDetector;
+    @Mock private MemoryStore memoryStore;
+    @Mock private SuggestionDeliveryService deliveryService;
+    
+    private SuggestionScheduler suggestionScheduler;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        suggestionScheduler = new SuggestionScheduler(
+            patternAnalyzer, opportunityDetector, memoryStore, deliveryService
+        );
+    }
+    
+    @AfterEach
+    void tearDown() {
+        suggestionScheduler.shutdown();
+    }
+    
+    @Test
+    void testGenerateSuggestionsNow() {
+        // Arrange
+        String userId = "testUser";
+        PatternAnalysisResult mockPatterns = createMockPatternAnalysisResult();
+        OpportunityAnalysisResult mockOpportunities = createMockOpportunityAnalysisResult();
+        UserContext mockUserContext = createMockUserContext(userId);
+        
+        when(patternAnalyzer.analyzeUserPatterns(eq(userId), any(Duration.class)))
+            .thenReturn(mockPatterns);
+        when(opportunityDetector.detectOpportunities(eq(userId), any(Duration.class)))
+            .thenReturn(mockOpportunities);
+        when(memoryStore.getUserContext(userId))
+            .thenReturn(mockUserContext);
+        when(memoryStore.getSuggestionDeliveries(eq(userId), any(Instant.class)))
+            .thenReturn(new ArrayList<>());
+        
+        // Act
+        SuggestionBatch suggestions = suggestionScheduler.generateSuggestionsNow(userId);
+        
+        // Assert
+        assertNotNull(suggestions);
+        assertEquals(userId, suggestions.getUserId());
+        assertNotNull(suggestions.getCreatedAt());
+        
+        // Verify interactions
+        verify(patternAnalyzer).analyzeUserPatterns(eq(userId), any(Duration.class));
+        verify(opportunityDetector).detectOpportunities(eq(userId), any(Duration.class));
+        verify(memoryStore).getUserContext(userId);
+    }
+    
+    @Test
+    void testStartAndStopScheduling() throws InterruptedException {
+        // Arrange
+        String userId = "testUser";
+        
+        // Mock dependencies to prevent actual analysis during test
+        when(patternAnalyzer.analyzeUserPatterns(any(), any()))
+            .thenReturn(new PatternAnalysisResult(userId, Duration.ofDays(30)));
+        when(opportunityDetector.detectOpportunities(any(), any()))
+            .thenReturn(new OpportunityAnalysisResult(userId, Duration.ofDays(30)));
+        when(memoryStore.getUserContext(any()))
+            .thenReturn(createMockUserContext(userId));
+        when(memoryStore.getSuggestionDeliveries(any(), any()))
+            .thenReturn(new ArrayList<>());
+        
+        // Act
+        suggestionScheduler.startSchedulingForUser(userId);
+        
+        // Give it a moment to start
+        Thread.sleep(100);
+        
+        suggestionScheduler.stopSchedulingForUser(userId);
+        
+        // Assert - no exception should be thrown
+        // The actual scheduling behavior is tested in integration tests
+        assertTrue(true);
+    }
+    
+    @Test
+    void testSuggestionCreationFromOpportunity() {
+        // Arrange
+        String userId = "testUser";
+        AutomationOpportunity opportunity = createMockSchedulingOpportunity();
+        UserContext userContext = createMockUserContext(userId);
+        PatternAnalysisResult patterns = createMockPatternAnalysisResult();
+        
+        when(memoryStore.getUserContext(userId)).thenReturn(userContext);
+        
+        // This test verifies the core suggestion creation logic by calling generateSuggestionsNow
+        when(patternAnalyzer.analyzeUserPatterns(eq(userId), any(Duration.class)))
+            .thenReturn(patterns);
+        when(opportunityDetector.detectOpportunities(eq(userId), any(Duration.class)))
+            .thenReturn(createOpportunityAnalysisResultWithOpportunities(opportunity));
+        when(memoryStore.getSuggestionDeliveries(eq(userId), any(Instant.class)))
+            .thenReturn(new ArrayList<>());
+        
+        // Act
+        SuggestionBatch suggestions = suggestionScheduler.generateSuggestionsNow(userId);
+        
+        // Assert
+        assertNotNull(suggestions);
+        assertTrue(suggestions.hasSuggestions());
+        
+        ContextualSuggestion suggestion = suggestions.getSuggestions().get(0);
+        assertNotNull(suggestion.getSuggestionId());
+        assertNotNull(suggestion.getType());
+        assertNotNull(suggestion.getMessage());
+        assertFalse(suggestion.getActionableSteps().isEmpty());
+        assertTrue(suggestion.getRelevanceScore() > 0);
+    }
+    
+    @Test
+    void testRateLimiting() {
+        // Arrange
+        String userId = "testUser";
+        
+        // Mock recent deliveries to test rate limiting
+        List<SuggestionDelivery> recentDeliveries = Arrays.asList(
+            new SuggestionDelivery(userId, 3, Instant.now().minus(Duration.ofMinutes(30)), 
+                                 Instant.now().minus(Duration.ofMinutes(30)), 
+                                 Arrays.asList("sugg1", "sugg2", "sugg3"))
+        );
+        
+        when(memoryStore.getSuggestionDeliveries(eq(userId), any(Instant.class)))
+            .thenReturn(recentDeliveries);
+        when(patternAnalyzer.analyzeUserPatterns(any(), any()))
+            .thenReturn(createMockPatternAnalysisResult());
+        when(opportunityDetector.detectOpportunities(any(), any()))
+            .thenReturn(createMockOpportunityAnalysisResult());
+        when(memoryStore.getUserContext(any()))
+            .thenReturn(createMockUserContext(userId));
+        
+        // Act
+        SuggestionBatch suggestions = suggestionScheduler.generateSuggestionsNow(userId);
+        
+        // Assert - suggestions should still be generated, but delivery would be rate limited
+        // The actual rate limiting happens in the scheduled task, not in generateSuggestionsNow
+        assertNotNull(suggestions);
+    }
+    
+    @Test
+    void testEmptySuggestionsHandling() {
+        // Arrange
+        String userId = "testUser";
+        
+        // Mock empty results
+        when(patternAnalyzer.analyzeUserPatterns(any(), any()))
+            .thenReturn(new PatternAnalysisResult(userId, Duration.ofDays(30)));
+        when(opportunityDetector.detectOpportunities(any(), any()))
+            .thenReturn(new OpportunityAnalysisResult(userId, Duration.ofDays(30)));
+        when(memoryStore.getUserContext(any()))
+            .thenReturn(createMockUserContext(userId));
+        when(memoryStore.getSuggestionDeliveries(any(), any()))
+            .thenReturn(new ArrayList<>());
+        
+        // Act
+        SuggestionBatch suggestions = suggestionScheduler.generateSuggestionsNow(userId);
+        
+        // Assert
+        assertNotNull(suggestions);
+        assertFalse(suggestions.hasSuggestions());
+        assertEquals(0, suggestions.getSuggestionCount());
+    }
+    
+    @Test
+    void testSuggestionBatchMethods() {
+        // Arrange
+        String userId = "testUser";
+        List<ContextualSuggestion> suggestionsList = Arrays.asList(
+            createMockContextualSuggestion("sugg1", SuggestionType.AUTOMATION_SCHEDULING, 0.9),
+            createMockContextualSuggestion("sugg2", SuggestionType.WORKFLOW_AUTOMATION, 0.8),
+            createMockContextualSuggestion("sugg3", SuggestionType.TEMPLATE_CREATION, 0.7)
+        );
+        
+        SuggestionBatch batch = new SuggestionBatch(userId, suggestionsList, Instant.now());
+        
+        // Act & Assert
+        assertEquals(userId, batch.getUserId());
+        assertEquals(3, batch.getSuggestionCount());
+        assertTrue(batch.hasSuggestions());
+        
+        Optional<ContextualSuggestion> topSuggestion = batch.getTopSuggestion();
+        assertTrue(topSuggestion.isPresent());
+        assertEquals("sugg1", topSuggestion.get().getSuggestionId());
+        
+        Duration totalSavings = batch.getTotalEstimatedSavings();
+        assertNotNull(totalSavings);
+        
+        Map<SuggestionType, Long> summary = batch.getSummaryByType();
+        assertEquals(3, summary.size());
+        assertEquals(1L, summary.get(SuggestionType.AUTOMATION_SCHEDULING));
+    }
+    
+    // Helper methods to create test data
+    
+    private PatternAnalysisResult createMockPatternAnalysisResult() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addTemporalPatterns(Arrays.asList(
+            new TemporalPattern(DayOfWeek.MONDAY, 9, 5, 0.8, Set.of("emailPlugin"))
+        ));
+        
+        return result;
+    }
+    
+    private OpportunityAnalysisResult createMockOpportunityAnalysisResult() {
+        OpportunityAnalysisResult result = new OpportunityAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addOpportunities(Arrays.asList(
+            createMockSchedulingOpportunity()
+        ));
+        
+        return result;
+    }
+    
+    private OpportunityAnalysisResult createOpportunityAnalysisResultWithOpportunities(AutomationOpportunity... opportunities) {
+        OpportunityAnalysisResult result = new OpportunityAnalysisResult("testUser", Duration.ofDays(30));
+        result.addOpportunities(Arrays.asList(opportunities));
+        return result;
+    }
+    
+    private AutomationOpportunity createMockSchedulingOpportunity() {
+        return new SchedulingOpportunity(
+            "schedule_monday_9",
+            "Schedule regular tasks for Monday at 9:00",
+            0.85,
+            DayOfWeek.MONDAY,
+            9,
+            Set.of("emailPlugin"),
+            0.8
+        );
+    }
+    
+    private UserContext createMockUserContext(String userId) {
+        Map<String, Instant> recentActivities = Map.of(
+            "emailPlugin", Instant.now().minus(Duration.ofHours(2))
+        );
+        Map<String, Instant> recentSuggestions = new HashMap<>();
+        
+        return new UserContext(
+            userId,
+            recentActivities,
+            recentSuggestions,
+            "emailPlugin",
+            Instant.now().minus(Duration.ofHours(2))
+        );
+    }
+    
+    private ContextualSuggestion createMockContextualSuggestion(String id, SuggestionType type, double relevance) {
+        return new ContextualSuggestion(
+            id,
+            type,
+            "Test suggestion message",
+            Arrays.asList("Action 1", "Action 2"),
+            relevance,
+            Duration.ofMinutes(10),
+            Instant.now(),
+            Map.of("test", "metadata")
+        );
+    }
+}

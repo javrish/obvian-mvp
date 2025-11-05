@@ -1,0 +1,368 @@
+package tests.api;
+
+import api.controller.SuggestionController;
+import core.*;
+import core.SuggestionTypes.*;
+import core.PatternTypes.*;
+import core.OpportunityTypes.*;
+import memory.MemoryStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.ResponseEntity;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * Comprehensive tests for SuggestionController REST API
+ */
+@ExtendWith(MockitoExtension.class)
+public class SuggestionControllerTest {
+    
+    @Mock private PatternAnalyzer patternAnalyzer;
+    @Mock private OpportunityDetector opportunityDetector;
+    @Mock private SuggestionScheduler suggestionScheduler;
+    @Mock private MemoryStore memoryStore;
+    
+    @InjectMocks
+    private SuggestionController suggestionController;
+    
+    private MockMvc mockMvc;
+    
+    @BeforeEach
+    void setUp() {
+        mockMvc = MockMvcBuilders.standaloneSetup(suggestionController).build();
+    }
+    
+    @Test
+    void testGenerateSuggestions() {
+        // Arrange
+        String userId = "testUser";
+        SuggestionBatch mockBatch = createMockSuggestionBatch(userId);
+        
+        when(suggestionScheduler.generateSuggestionsNow(userId))
+            .thenReturn(mockBatch);
+        
+        // Act
+        ResponseEntity<SuggestionBatch> response = suggestionController.generateSuggestions(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals(userId, response.getBody().getUserId());
+        verify(suggestionScheduler).generateSuggestionsNow(userId);
+    }
+    
+    @Test
+    void testAnalyzePatterns() {
+        // Arrange
+        String userId = "testUser";
+        PatternAnalysisResult mockResult = createMockPatternAnalysisResult(userId);
+        
+        when(patternAnalyzer.analyzeUserPatterns(eq(userId), any(Duration.class)))
+            .thenReturn(mockResult);
+        
+        // Act
+        ResponseEntity<PatternAnalysisResult> response = suggestionController.analyzePatterns(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals(userId, response.getBody().getUserId());
+        verify(patternAnalyzer).analyzeUserPatterns(eq(userId), eq(Duration.ofDays(30)));
+    }
+    
+    @Test
+    void testDetectOpportunities() {
+        // Arrange
+        String userId = "testUser";
+        OpportunityAnalysisResult mockResult = createMockOpportunityAnalysisResult(userId);
+        
+        when(opportunityDetector.detectOpportunities(eq(userId), any(Duration.class)))
+            .thenReturn(mockResult);
+        
+        // Act
+        ResponseEntity<OpportunityAnalysisResult> response = suggestionController.detectOpportunities(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals(userId, response.getBody().getUserId());
+        verify(opportunityDetector).detectOpportunities(eq(userId), eq(Duration.ofDays(30)));
+    }
+    
+    @Test
+    void testGetPatternSummary() {
+        // Arrange
+        String userId = "testUser";
+        PatternAnalysisResult mockResult = createMockPatternAnalysisResult(userId);
+        
+        when(patternAnalyzer.analyzeUserPatterns(eq(userId), any(Duration.class)))
+            .thenReturn(mockResult);
+        
+        // Act
+        ResponseEntity<PatternSummary> response = suggestionController.getPatternSummary(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().getTotalPatternCount() >= 0);
+        assertTrue(response.getBody().getAverageConfidence() >= 0);
+    }
+    
+    @Test
+    void testGetOpportunitySummary() {
+        // Arrange
+        String userId = "testUser";
+        OpportunityAnalysisResult mockResult = createMockOpportunityAnalysisResult(userId);
+        
+        when(opportunityDetector.detectOpportunities(eq(userId), any(Duration.class)))
+            .thenReturn(mockResult);
+        
+        // Act
+        ResponseEntity<OpportunitySummary> response = suggestionController.getOpportunitySummary(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().getTotalOpportunities() >= 0);
+        assertTrue(response.getBody().getAverageScore() >= 0);
+    }
+    
+    @Test
+    void testStartScheduling() {
+        // Arrange
+        String userId = "testUser";
+        
+        // Act
+        ResponseEntity<Map<String, String>> response = suggestionController.startScheduling(userId);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals("started", response.getBody().get("status"));
+        assertEquals(userId, response.getBody().get("userId"));
+        verify(suggestionScheduler).startSchedulingForUser(userId);
+    }
+    
+    @Test
+    void testStopScheduling() {
+        // Arrange
+        String userId = "testUser";
+        
+        // Act
+        ResponseEntity<Map<String, String>> response = suggestionController.stopScheduling(userId);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals("stopped", response.getBody().get("status"));
+        assertEquals(userId, response.getBody().get("userId"));
+        verify(suggestionScheduler).stopSchedulingForUser(userId);
+    }
+    
+    @Test
+    void testGetSuggestionDeliveries() {
+        // Arrange
+        String userId = "testUser";
+        List<SuggestionDelivery> mockDeliveries = createMockSuggestionDeliveries(userId);
+        
+        when(memoryStore.getSuggestionDeliveries(eq(userId), any(Instant.class)))
+            .thenReturn(mockDeliveries);
+        
+        // Act
+        ResponseEntity<List<SuggestionDelivery>> response = suggestionController.getSuggestionDeliveries(userId, 7);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals(2, response.getBody().size());
+        verify(memoryStore).getSuggestionDeliveries(eq(userId), any(Instant.class));
+    }
+    
+    @Test
+    void testGetUserContext() {
+        // Arrange
+        String userId = "testUser";
+        UserContext mockContext = createMockUserContext(userId);
+        
+        when(memoryStore.getUserContext(userId))
+            .thenReturn(mockContext);
+        
+        // Act
+        ResponseEntity<UserContext> response = suggestionController.getUserContext(userId);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals(userId, response.getBody().getUserId());
+        verify(memoryStore).getUserContext(userId);
+    }
+    
+    @Test
+    void testGetTemporalPatterns() {
+        // Arrange
+        String userId = "testUser";
+        PatternAnalysisResult mockResult = createMockPatternAnalysisResult(userId);
+        
+        when(patternAnalyzer.analyzeUserPatterns(eq(userId), any(Duration.class)))
+            .thenReturn(mockResult);
+        
+        // Act
+        ResponseEntity<List<TemporalPattern>> response = suggestionController.getTemporalPatterns(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals(1, response.getBody().size());
+    }
+    
+    @Test
+    void testGetSchedulingOpportunities() {
+        // Arrange
+        String userId = "testUser";
+        OpportunityAnalysisResult mockResult = createMockOpportunityAnalysisResult(userId);
+        
+        when(opportunityDetector.detectOpportunities(eq(userId), any(Duration.class)))
+            .thenReturn(mockResult);
+        
+        // Act
+        ResponseEntity<List<AutomationOpportunity>> response = suggestionController.getSchedulingOpportunities(userId, 30);
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+    }
+    
+    @Test
+    void testHealthCheck() {
+        // Act
+        ResponseEntity<Map<String, Object>> response = suggestionController.healthCheck();
+        
+        // Assert
+        assertEquals(200, response.getStatusCodeValue());
+        assertNotNull(response.getBody());
+        assertEquals("healthy", response.getBody().get("status"));
+        assertEquals("Autonomous Suggestion Engine", response.getBody().get("service"));
+        assertEquals("1.0.0", response.getBody().get("version"));
+        assertNotNull(response.getBody().get("timestamp"));
+    }
+    
+    @Test
+    void testErrorHandling() {
+        // Arrange
+        String userId = "testUser";
+        
+        when(suggestionScheduler.generateSuggestionsNow(userId))
+            .thenThrow(new RuntimeException("Test exception"));
+        
+        // Act
+        ResponseEntity<SuggestionBatch> response = suggestionController.generateSuggestions(userId, 30);
+        
+        // Assert
+        assertEquals(500, response.getStatusCodeValue());
+    }
+    
+    @Test
+    void testDefaultParameters() {
+        // Arrange
+        PatternAnalysisResult mockResult = createMockPatternAnalysisResult("default-user");
+        
+        when(patternAnalyzer.analyzeUserPatterns(eq("default-user"), eq(Duration.ofDays(30))))
+            .thenReturn(mockResult);
+        
+        // Act - call without specifying userId or analysisDays
+        ResponseEntity<PatternAnalysisResult> response = suggestionController.analyzePatterns(null, 0);
+        
+        // The controller should use default values
+        // Note: In the actual implementation, Spring would use the defaultValue from @RequestParam
+        // This test verifies the controller handles the call correctly
+        assertNotNull(response);
+    }
+    
+    // Helper methods to create test data
+    
+    private SuggestionBatch createMockSuggestionBatch(String userId) {
+        List<ContextualSuggestion> suggestions = Arrays.asList(
+            new ContextualSuggestion(
+                "sugg1",
+                SuggestionType.AUTOMATION_SCHEDULING,
+                "Test suggestion",
+                Arrays.asList("Action 1", "Action 2"),
+                0.8,
+                Duration.ofMinutes(10),
+                Instant.now(),
+                Map.of("test", "metadata")
+            )
+        );
+        
+        return new SuggestionBatch(userId, suggestions, Instant.now());
+    }
+    
+    private PatternAnalysisResult createMockPatternAnalysisResult(String userId) {
+        PatternAnalysisResult result = new PatternAnalysisResult(userId, Duration.ofDays(30));
+        
+        result.addTemporalPatterns(Arrays.asList(
+            new TemporalPattern(java.time.DayOfWeek.MONDAY, 9, 5, 0.8, Set.of("emailPlugin"))
+        ));
+        
+        return result;
+    }
+    
+    private OpportunityAnalysisResult createMockOpportunityAnalysisResult(String userId) {
+        OpportunityAnalysisResult result = new OpportunityAnalysisResult(userId, Duration.ofDays(30));
+        
+        result.addOpportunities(Arrays.asList(
+            new SchedulingOpportunity(
+                "schedule_monday_9",
+                "Schedule regular tasks for Monday at 9:00",
+                0.85,
+                java.time.DayOfWeek.MONDAY,
+                9,
+                Set.of("emailPlugin"),
+                0.8
+            )
+        ));
+        
+        return result;
+    }
+    
+    private List<SuggestionDelivery> createMockSuggestionDeliveries(String userId) {
+        return Arrays.asList(
+            new SuggestionDelivery(userId, 2, Instant.now().minus(Duration.ofDays(1)), 
+                                 Instant.now().minus(Duration.ofDays(1)), 
+                                 Arrays.asList("sugg1", "sugg2")),
+            new SuggestionDelivery(userId, 1, Instant.now().minus(Duration.ofDays(2)), 
+                                 Instant.now().minus(Duration.ofDays(2)), 
+                                 Arrays.asList("sugg3"))
+        );
+    }
+    
+    private UserContext createMockUserContext(String userId) {
+        Map<String, Instant> recentActivities = Map.of(
+            "emailPlugin", Instant.now().minus(Duration.ofHours(2))
+        );
+        Map<String, Instant> recentSuggestions = new HashMap<>();
+        
+        return new UserContext(
+            userId,
+            recentActivities,
+            recentSuggestions,
+            "emailPlugin",
+            Instant.now().minus(Duration.ofHours(2))
+        );
+    }
+}

@@ -1,0 +1,308 @@
+.plugin-store {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.store-header {
+    text-align: center;
+    margin-bottom: 40px;
+}
+
+.store-header h1 {
+    font-size: 36px;
+    color: #202124;
+    margin-bottom: 10px;
+}
+
+.store-header p {
+    color: #5f6368;
+    font-size: 16px;
+}
+
+/* Filters */
+.store-filters {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+}
+
+.store-filters button {
+    padding: 8px 20px;
+    background: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-radius: 20px;
+    color: #5f6368;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s;
+}
+
+.store-filters button:hover {
+    background: #e8eaed;
+}
+
+.store-filters button.active {
+    background: #1a73e8;
+    color: white;
+    border-color: #1a73e8;
+}
+
+/* Plugins Grid */
+.plugins-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 20px;
+    margin-bottom: 40px;
+}
+
+.plugin-card {
+    background: white;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    padding: 20px;
+    transition: box-shadow 0.3s;
+}
+
+.plugin-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.plugin-header {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.plugin-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+}
+
+.plugin-info h3 {
+    margin: 0 0 8px 0;
+    color: #202124;
+    font-size: 18px;
+}
+
+.plugin-info p {
+    margin: 0;
+    color: #5f6368;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+/* Auth Info */
+.plugin-auth-info {
+    margin: 15px 0;
+    display: flex;
+    gap: 8px;
+}
+
+.auth-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.auth-badge.google {
+    background: #e8f0fe;
+    color: #1a73e8;
+}
+
+.auth-badge.api-key {
+    background: #fce8b2;
+    color: #f9ab00;
+}
+
+.auth-badge.token {
+    background: #e6f4ea;
+    color: #137333;
+}
+
+.auth-badge.oauth {
+    background: #f3e8fd;
+    color: #7c4dff;
+}
+
+/* Plugin Actions */
+.plugin-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.install-btn {
+    flex: 1;
+    padding: 10px 20px;
+    background: #1a73e8;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+
+.install-btn:hover {
+    background: #1557b0;
+}
+
+.install-btn:disabled {
+    background: #dadce0;
+    cursor: not-allowed;
+}
+
+.installed-btn {
+    flex: 1;
+    padding: 10px 20px;
+    background: #e6f4ea;
+    color: #137333;
+    border: 1px solid #137333;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: default;
+}
+
+.uninstall-btn {
+    padding: 10px 20px;
+    background: white;
+    color: #d33b3b;
+    border: 1px solid #d33b3b;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.uninstall-btn:hover {
+    background: #fce8e6;
+}
+
+.plugin-warning {
+    margin-top: 10px;
+    padding: 8px;
+    background: #fef7e0;
+    border-left: 3px solid #f9ab00;
+    border-radius: 4px;
+    color: #b06000;
+    font-size: 13px;
+}
+
+/* Configuration Modal */
+.config-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.config-modal {
+    background: white;
+    border-radius: 8px;
+    padding: 30px;
+    max-width: 500px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.config-modal h2 {
+    margin-top: 0;
+    color: #202124;
+}
+
+.config-field {
+    margin: 20px 0;
+}
+
+.config-field label {
+    display: block;
+    margin-bottom: 8px;
+    color: #5f6368;
+    font-size: 14px;
+}
+
+.config-field input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #dadce0;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.config-field input:focus {
+    outline: none;
+    border-color: #1a73e8;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    margin-top: 30px;
+}
+
+.modal-actions button {
+    padding: 10px 20px;
+    border: 1px solid #dadce0;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.modal-actions button.primary {
+    background: #1a73e8;
+    color: white;
+    border-color: #1a73e8;
+}
+
+.modal-actions button:hover {
+    background: #f8f9fa;
+}
+
+.modal-actions button.primary:hover {
+    background: #1557b0;
+}
+
+/* Store Info */
+.store-info {
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 30px;
+    margin-top: 40px;
+}
+
+.store-info h3 {
+    color: #202124;
+    margin-bottom: 20px;
+}
+
+.store-info ol {
+    color: #5f6368;
+    line-height: 1.8;
+    padding-left: 20px;
+}
+
+.privacy-note {
+    margin-top: 20px;
+    padding: 15px;
+    background: #e8f0fe;
+    border-left: 4px solid #1a73e8;
+    border-radius: 4px;
+    color: #202124;
+    font-size: 14px;
+}

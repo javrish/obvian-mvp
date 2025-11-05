@@ -1,0 +1,267 @@
+package tests.core;
+
+import core.*;
+import core.PatternTypes.*;
+import memory.MemoryStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.time.*;
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Comprehensive tests for PatternAnalyzer functionality
+ */
+public class PatternAnalyzerTest {
+    
+    @Mock private MemoryStore memoryStore;
+    private PatternAnalyzer patternAnalyzer;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        patternAnalyzer = new PatternAnalyzer(memoryStore);
+    }
+    
+    @Test
+    void testDetectTemporalPatterns() {
+        // Arrange
+        List<ExecutionHistory> history = createMockExecutionHistory();
+        
+        // Act
+        List<TemporalPattern> patterns = patternAnalyzer.detectTemporalPatterns(history);
+        
+        // Assert
+        assertNotNull(patterns);
+        assertFalse(patterns.isEmpty());
+        
+        // Check if patterns are sorted by confidence
+        for (int i = 1; i < patterns.size(); i++) {
+            assertTrue(patterns.get(i-1).getConfidence() >= patterns.get(i).getConfidence());
+        }
+        
+        // Verify pattern properties
+        TemporalPattern firstPattern = patterns.get(0);
+        assertNotNull(firstPattern.getDayOfWeek());
+        assertTrue(firstPattern.getHourOfDay() >= 0 && firstPattern.getHourOfDay() <= 23);
+        assertTrue(firstPattern.getConfidence() > 0);
+        assertFalse(firstPattern.getCommonTasks().isEmpty());
+    }
+    
+    @Test
+    void testDetectSequencePatterns() {
+        // Arrange
+        List<ExecutionHistory> history = createSequenceExecutionHistory();
+        
+        // Act
+        List<SequencePattern> patterns = patternAnalyzer.detectSequencePatterns(history);
+        
+        // Assert
+        assertNotNull(patterns);
+        
+        if (!patterns.isEmpty()) {
+            SequencePattern pattern = patterns.get(0);
+            assertNotNull(pattern.getSequence());
+            assertTrue(pattern.getSequence().size() >= 2);
+            assertTrue(pattern.getConfidence() > 0);
+            assertTrue(pattern.getOccurrences() >= 1);
+        }
+    }
+    
+    @Test
+    void testDetectParameterPatterns() {
+        // Arrange
+        List<ExecutionHistory> history = createParameterExecutionHistory();
+        
+        // Act
+        List<ParameterPattern> patterns = patternAnalyzer.detectParameterPatterns(history);
+        
+        // Assert
+        assertNotNull(patterns);
+        
+        if (!patterns.isEmpty()) {
+            ParameterPattern pattern = patterns.get(0);
+            assertNotNull(pattern.getPluginId());
+            assertNotNull(pattern.getParameterName());
+            assertNotNull(pattern.getCommonValue());
+            assertTrue(pattern.getConfidence() > 0);
+            assertTrue(pattern.getOccurrences() >= 1);
+        }
+    }
+    
+    @Test
+    void testDetectFrequencyPatterns() {
+        // Arrange
+        List<ExecutionHistory> history = createFrequencyExecutionHistory();
+        
+        // Act
+        List<FrequencyPattern> patterns = patternAnalyzer.detectFrequencyPatterns(history);
+        
+        // Assert
+        assertNotNull(patterns);
+        
+        if (!patterns.isEmpty()) {
+            FrequencyPattern pattern = patterns.get(0);
+            assertNotNull(pattern.getPluginId());
+            assertNotNull(pattern.getAverageInterval());
+            assertTrue(pattern.getRegularityScore() > 0);
+            assertTrue(pattern.getOccurrences() >= 1);
+        }
+    }
+    
+    @Test
+    void testAnalyzeUserPatterns() {
+        // Arrange
+        String userId = "testUser";
+        Duration timeWindow = Duration.ofDays(30);
+        
+        when(memoryStore.getExecutionHistory(eq(userId), any(Instant.class)))
+            .thenReturn(createMockExecutionHistory());
+        
+        // Act
+        PatternAnalysisResult result = patternAnalyzer.analyzeUserPatterns(userId, timeWindow);
+        
+        // Assert
+        assertNotNull(result);
+        assertEquals(userId, result.getUserId());
+        assertEquals(timeWindow, result.getTimeWindow());
+        assertNotNull(result.getAnalyzedAt());
+        
+        // Check pattern lists are initialized
+        assertNotNull(result.getTemporalPatterns());
+        assertNotNull(result.getSequencePatterns());
+        assertNotNull(result.getParameterPatterns());
+        assertNotNull(result.getFrequencyPatterns());
+        
+        // Verify summary generation
+        PatternSummary summary = result.getSummary();
+        assertNotNull(summary);
+        assertTrue(summary.getAverageConfidence() >= 0);
+    }
+    
+    @Test
+    void testMinimumThresholds() {
+        // Arrange - create history with insufficient data
+        List<ExecutionHistory> insufficientHistory = Arrays.asList(
+            createExecutionHistory("exec1", "plugin1", Instant.now().minus(Duration.ofHours(1)))
+        );
+        
+        // Act
+        List<TemporalPattern> temporalPatterns = patternAnalyzer.detectTemporalPatterns(insufficientHistory);
+        List<SequencePattern> sequencePatterns = patternAnalyzer.detectSequencePatterns(insufficientHistory);
+        List<ParameterPattern> parameterPatterns = patternAnalyzer.detectParameterPatterns(insufficientHistory);
+        List<FrequencyPattern> frequencyPatterns = patternAnalyzer.detectFrequencyPatterns(insufficientHistory);
+        
+        // Assert - should return empty lists due to insufficient data
+        assertTrue(temporalPatterns.isEmpty());
+        assertTrue(sequencePatterns.isEmpty());
+        assertTrue(parameterPatterns.isEmpty());
+        assertTrue(frequencyPatterns.isEmpty());
+    }
+    
+    // Helper methods to create test data
+    
+    private List<ExecutionHistory> createMockExecutionHistory() {
+        List<ExecutionHistory> history = new ArrayList<>();
+        
+        // Create executions at same day/hour to form temporal patterns
+        DayOfWeek targetDay = DayOfWeek.MONDAY;
+        int targetHour = 9;
+        
+        for (int i = 0; i < 5; i++) {
+            Instant timestamp = LocalDateTime.now()
+                .with(targetDay)
+                .withHour(targetHour)
+                .minusWeeks(i)
+                .atZone(ZoneId.systemDefault())
+                .toInstant();
+            
+            history.add(createExecutionHistory("exec" + i, "emailPlugin", timestamp));
+        }
+        
+        // Add some noise
+        for (int i = 0; i < 3; i++) {
+            Instant timestamp = LocalDateTime.now()
+                .with(DayOfWeek.TUESDAY)
+                .withHour(14)
+                .minusWeeks(i)
+                .atZone(ZoneId.systemDefault())
+                .toInstant();
+            
+            history.add(createExecutionHistory("noise" + i, "filePlugin", timestamp));
+        }
+        
+        return history;
+    }
+    
+    private List<ExecutionHistory> createSequenceExecutionHistory() {
+        List<ExecutionHistory> history = new ArrayList<>();
+        
+        // Create sequences: emailPlugin -> slackPlugin
+        Instant baseTime = Instant.now().minus(Duration.ofDays(7));
+        
+        for (int i = 0; i < 4; i++) {
+            Instant time1 = baseTime.plus(Duration.ofDays(i)).plus(Duration.ofMinutes(i * 10));
+            Instant time2 = time1.plus(Duration.ofMinutes(5));
+            
+            history.add(createExecutionHistory("seq" + i + "_1", "emailPlugin", time1));
+            history.add(createExecutionHistory("seq" + i + "_2", "slackPlugin", time2));
+        }
+        
+        return history;
+    }
+    
+    private List<ExecutionHistory> createParameterExecutionHistory() {
+        List<ExecutionHistory> history = new ArrayList<>();
+        
+        // Create executions with common parameters
+        Map<String, Object> commonParams = Map.of(
+            "recipient", "user@example.com",
+            "subject", "Daily Report"
+        );
+        
+        for (int i = 0; i < 5; i++) {
+            Instant timestamp = Instant.now().minus(Duration.ofDays(i));
+            history.add(createExecutionHistoryWithParams("param" + i, "emailPlugin", timestamp, commonParams));
+        }
+        
+        return history;
+    }
+    
+    private List<ExecutionHistory> createFrequencyExecutionHistory() {
+        List<ExecutionHistory> history = new ArrayList<>();
+        
+        // Create regular executions every 2 hours
+        Instant baseTime = Instant.now().minus(Duration.ofDays(1));
+        
+        for (int i = 0; i < 10; i++) {
+            Instant timestamp = baseTime.plus(Duration.ofHours(i * 2));
+            history.add(createExecutionHistory("freq" + i, "backupPlugin", timestamp));
+        }
+        
+        return history;
+    }
+    
+    private ExecutionHistory createExecutionHistory(String executionId, String pluginId, Instant timestamp) {
+        return createExecutionHistoryWithParams(executionId, pluginId, timestamp, Map.of());
+    }
+    
+    private ExecutionHistory createExecutionHistoryWithParams(String executionId, String pluginId, 
+                                                             Instant timestamp, Map<String, Object> params) {
+        return new ExecutionHistory(
+            executionId,
+            "testUser",
+            pluginId,
+            timestamp,
+            params,
+            true, // successful
+            Duration.ofSeconds(5) // execution time
+        );
+    }
+}

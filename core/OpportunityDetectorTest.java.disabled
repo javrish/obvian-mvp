@@ -1,0 +1,303 @@
+package tests.core;
+
+import core.*;
+import core.PatternTypes.*;
+import core.OpportunityTypes.*;
+import memory.MemoryStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.time.*;
+import java.util.*;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Comprehensive tests for OpportunityDetector functionality
+ */
+public class OpportunityDetectorTest {
+    
+    @Mock private PatternAnalyzer patternAnalyzer;
+    @Mock private MemoryStore memoryStore;
+    private OpportunityDetector opportunityDetector;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        opportunityDetector = new OpportunityDetector(patternAnalyzer, memoryStore);
+    }
+    
+    @Test
+    void testDetectOpportunities() {
+        // Arrange
+        String userId = "testUser";
+        Duration analysisWindow = Duration.ofDays(30);
+        PatternAnalysisResult mockPatterns = createMockPatternAnalysisResult();
+        
+        when(patternAnalyzer.analyzeUserPatterns(userId, analysisWindow))
+            .thenReturn(mockPatterns);
+        when(memoryStore.getExecutionHistory(eq(userId), any(Duration.class)))
+            .thenReturn(createMockExecutionHistory());
+        
+        // Act
+        OpportunityAnalysisResult result = opportunityDetector.detectOpportunities(userId, analysisWindow);
+        
+        // Assert
+        assertNotNull(result);
+        assertEquals(userId, result.getUserId());
+        assertEquals(analysisWindow, result.getAnalysisWindow());
+        assertNotNull(result.getAnalyzedAt());
+        assertNotNull(result.getOpportunities());
+        
+        // Check summary generation
+        OpportunitySummary summary = result.getSummary();
+        assertNotNull(summary);
+        assertTrue(summary.getAverageScore() >= 0);
+    }
+    
+    @Test
+    void testDetectSchedulingOpportunities() {
+        // Arrange
+        PatternAnalysisResult patterns = createPatternAnalysisWithTemporalPatterns();
+        
+        // Act
+        List<AutomationOpportunity> opportunities = opportunityDetector.detectSchedulingOpportunities(patterns);
+        
+        // Assert
+        assertNotNull(opportunities);
+        
+        for (AutomationOpportunity opportunity : opportunities) {
+            assertEquals("SCHEDULING", opportunity.getOpportunityType());
+            assertTrue(opportunity.getOpportunityScore() >= 0.7); // Above minimum threshold
+            assertNotNull(opportunity.getActionableSteps());
+            assertFalse(opportunity.getActionableSteps().isEmpty());
+            assertNotNull(opportunity.getEstimatedTimeSavings());
+        }
+    }
+    
+    @Test
+    void testDetectWorkflowOpportunities() {
+        // Arrange
+        PatternAnalysisResult patterns = createPatternAnalysisWithSequencePatterns();
+        
+        // Act
+        List<AutomationOpportunity> opportunities = opportunityDetector.detectWorkflowOpportunities(patterns);
+        
+        // Assert
+        assertNotNull(opportunities);
+        
+        for (AutomationOpportunity opportunity : opportunities) {
+            assertEquals("WORKFLOW", opportunity.getOpportunityType());
+            assertTrue(opportunity.getOpportunityScore() >= 0.7);
+            assertNotNull(opportunity.getActionableSteps());
+            assertFalse(opportunity.getActionableSteps().isEmpty());
+        }
+    }
+    
+    @Test
+    void testDetectTemplateOpportunities() {
+        // Arrange
+        PatternAnalysisResult patterns = createPatternAnalysisWithParameterPatterns();
+        
+        // Act
+        List<AutomationOpportunity> opportunities = opportunityDetector.detectTemplateOpportunities(patterns);
+        
+        // Assert
+        assertNotNull(opportunities);
+        
+        for (AutomationOpportunity opportunity : opportunities) {
+            assertEquals("TEMPLATE", opportunity.getOpportunityType());
+            assertTrue(opportunity.getOpportunityScore() >= 0.7);
+            assertNotNull(opportunity.getMetadata().get("pluginId"));
+            assertNotNull(opportunity.getMetadata().get("commonParameters"));
+        }
+    }
+    
+    @Test
+    void testDetectEfficiencyOpportunities() {
+        // Arrange
+        PatternAnalysisResult patterns = createPatternAnalysisWithFrequencyPatterns();
+        
+        // Act
+        List<AutomationOpportunity> opportunities = opportunityDetector.detectEfficiencyOpportunities(patterns);
+        
+        // Assert
+        assertNotNull(opportunities);
+        
+        for (AutomationOpportunity opportunity : opportunities) {
+            assertEquals("BATCHING", opportunity.getOpportunityType());
+            assertTrue(opportunity.getOpportunityScore() >= 0.7);
+            assertNotNull(opportunity.getMetadata().get("pluginId"));
+        }
+    }
+    
+    @Test
+    void testDetectPredictiveOpportunities() {
+        // Arrange
+        PatternAnalysisResult patterns = createMockPatternAnalysisResult();
+        String userId = "testUser";
+        
+        when(memoryStore.getExecutionHistory(eq(userId), any(Duration.class)))
+            .thenReturn(createFailureExecutionHistory());
+        
+        // Act
+        List<AutomationOpportunity> opportunities = opportunityDetector.detectPredictiveOpportunities(patterns, userId);
+        
+        // Assert
+        assertNotNull(opportunities);
+        
+        for (AutomationOpportunity opportunity : opportunities) {
+            assertEquals("PREDICTIVE", opportunity.getOpportunityType());
+            assertNotNull(opportunity.getMetadata().get("currentFailureRate"));
+            assertNotNull(opportunity.getActionableSteps());
+        }
+    }
+    
+    @Test
+    void testOpportunityScoring() {
+        // Arrange
+        PatternAnalysisResult patterns = createPatternAnalysisWithHighConfidencePatterns();
+        
+        // Act
+        List<AutomationOpportunity> schedulingOpps = opportunityDetector.detectSchedulingOpportunities(patterns);
+        
+        // Assert
+        if (!schedulingOpps.isEmpty()) {
+            AutomationOpportunity highConfidenceOpp = schedulingOpps.get(0);
+            assertTrue(highConfidenceOpp.getOpportunityScore() > 0.8);
+        }
+    }
+    
+    @Test
+    void testMinimumThresholds() {
+        // Arrange
+        PatternAnalysisResult lowConfidencePatterns = createPatternAnalysisWithLowConfidencePatterns();
+        
+        // Act
+        List<AutomationOpportunity> opportunities = opportunityDetector.detectSchedulingOpportunities(lowConfidencePatterns);
+        
+        // Assert - should filter out low confidence opportunities
+        assertTrue(opportunities.isEmpty() || 
+                  opportunities.stream().allMatch(opp -> opp.getOpportunityScore() >= 0.7));
+    }
+    
+    // Helper methods to create test data
+    
+    private PatternAnalysisResult createMockPatternAnalysisResult() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addTemporalPatterns(Arrays.asList(
+            new TemporalPattern(DayOfWeek.MONDAY, 9, 5, 0.8, Set.of("emailPlugin"))
+        ));
+        
+        result.addSequencePatterns(Arrays.asList(
+            new SequencePattern(Arrays.asList("emailPlugin", "slackPlugin"), 4, 0.75)
+        ));
+        
+        result.addParameterPatterns(Arrays.asList(
+            new ParameterPattern("emailPlugin", "recipient", "user@example.com", 5, 0.8)
+        ));
+        
+        result.addFrequencyPatterns(Arrays.asList(
+            new FrequencyPattern("backupPlugin", Duration.ofHours(2), 0.5, 0.85, 10)
+        ));
+        
+        return result;
+    }
+    
+    private PatternAnalysisResult createPatternAnalysisWithTemporalPatterns() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addTemporalPatterns(Arrays.asList(
+            new TemporalPattern(DayOfWeek.MONDAY, 9, 8, 0.85, Set.of("emailPlugin", "reportPlugin")),
+            new TemporalPattern(DayOfWeek.FRIDAY, 17, 6, 0.8, Set.of("backupPlugin"))
+        ));
+        
+        return result;
+    }
+    
+    private PatternAnalysisResult createPatternAnalysisWithSequencePatterns() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addSequencePatterns(Arrays.asList(
+            new SequencePattern(Arrays.asList("emailPlugin", "slackPlugin", "filePlugin"), 5, 0.8),
+            new SequencePattern(Arrays.asList("backupPlugin", "reportPlugin"), 3, 0.75)
+        ));
+        
+        return result;
+    }
+    
+    private PatternAnalysisResult createPatternAnalysisWithParameterPatterns() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addParameterPatterns(Arrays.asList(
+            new ParameterPattern("emailPlugin", "recipient", "user@example.com", 7, 0.85),
+            new ParameterPattern("emailPlugin", "subject", "Daily Report", 5, 0.75),
+            new ParameterPattern("slackPlugin", "channel", "#general", 6, 0.8)
+        ));
+        
+        return result;
+    }
+    
+    private PatternAnalysisResult createPatternAnalysisWithFrequencyPatterns() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addFrequencyPatterns(Arrays.asList(
+            new FrequencyPattern("backupPlugin", Duration.ofHours(1), 0.2, 0.9, 20),
+            new FrequencyPattern("emailPlugin", Duration.ofHours(3), 0.3, 0.85, 15)
+        ));
+        
+        return result;
+    }
+    
+    private PatternAnalysisResult createPatternAnalysisWithHighConfidencePatterns() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addTemporalPatterns(Arrays.asList(
+            new TemporalPattern(DayOfWeek.MONDAY, 9, 15, 0.95, Set.of("emailPlugin", "reportPlugin"))
+        ));
+        
+        return result;
+    }
+    
+    private PatternAnalysisResult createPatternAnalysisWithLowConfidencePatterns() {
+        PatternAnalysisResult result = new PatternAnalysisResult("testUser", Duration.ofDays(30));
+        
+        result.addTemporalPatterns(Arrays.asList(
+            new TemporalPattern(DayOfWeek.MONDAY, 9, 2, 0.4, Set.of("emailPlugin")) // Low confidence
+        ));
+        
+        return result;
+    }
+    
+    private List<ExecutionHistory> createMockExecutionHistory() {
+        return Arrays.asList(
+            new ExecutionHistory("exec1", "testUser", "emailPlugin", 
+                               Instant.now().minus(Duration.ofDays(1)), 
+                               Map.of(), true, Duration.ofSeconds(5)),
+            new ExecutionHistory("exec2", "testUser", "slackPlugin", 
+                               Instant.now().minus(Duration.ofDays(2)), 
+                               Map.of(), true, Duration.ofSeconds(3))
+        );
+    }
+    
+    private List<ExecutionHistory> createFailureExecutionHistory() {
+        List<ExecutionHistory> history = new ArrayList<>();
+        
+        // Create history with failures for predictive opportunities
+        for (int i = 0; i < 10; i++) {
+            boolean successful = i % 3 != 0; // 66% success rate, 33% failure rate
+            history.add(new ExecutionHistory(
+                "exec" + i, "testUser", "problematicPlugin",
+                Instant.now().minus(Duration.ofDays(i)),
+                Map.of(), successful, Duration.ofSeconds(5)
+            ));
+        }
+        
+        return history;
+    }
+}

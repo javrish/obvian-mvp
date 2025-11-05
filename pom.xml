@@ -1,0 +1,1741 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.obvian</groupId>
+    <artifactId>obvian</artifactId>
+    <version>0.5.0</version>
+
+    <name>Obvian Core</name>
+    <description>Production-Grade DAG Execution Engine with Formal Petri Net Verification</description>
+    <url>https://github.com/rishabhpathak/obvian-core</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>rishabhpathak</id>
+            <name>Rishabh Pathak</name>
+            <email>rishabh@obvian.com</email>
+            <organization>Obvian</organization>
+            <roles>
+                <role>Lead Developer</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:git://github.com/rishabhpathak/obvian-core.git</connection>
+        <developerConnection>scm:git:ssh://github.com:rishabhpathak/obvian-core.git</developerConnection>
+        <url>https://github.com/rishabhpathak/obvian-core</url>
+    </scm>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <junit.version>5.10.0</junit.version>
+        <gson.version>2.10.1</gson.version>
+        <commons.lang.version>3.12.0</commons.lang.version>
+        <spring.boot.version>3.2.0</spring.boot.version>
+        <spring.security.version>6.2.0</spring.security.version>
+        <redis.version>4.4.6</redis.version>
+        <opentelemetry.version>1.32.0</opentelemetry.version>
+        <opentelemetry.instrumentation.version>2.0.0</opentelemetry.instrumentation.version>
+        <opentelemetry.semconv.version>1.23.1-alpha</opentelemetry.semconv.version>
+        <spotless.version>2.43.0</spotless.version>
+        <checkstyle.version>10.12.5</checkstyle.version>
+        <errorprone.version>2.23.0</errorprone.version>
+        <google.java.format.version>1.19.1</google.java.format.version>
+    </properties>
+
+    <dependencies>
+        <!-- JUnit 5 -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- JUnit Platform Suite for test suites -->
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-suite-api</artifactId>
+            <version>1.10.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-suite-engine</artifactId>
+            <version>1.10.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>5.10.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Mockito JUnit Jupiter integration -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>5.10.0</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Gson -->
+        <dependency>
+            <groupId>com.google.code.gson</groupId>
+            <artifactId>gson</artifactId>
+            <version>${gson.version}</version>
+        </dependency>
+
+        <!-- Apache Commons Lang -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>${commons.lang.version}</version>
+        </dependency>
+
+        <!-- JavaMail for email functionality -->
+        <dependency>
+            <groupId>com.sun.mail</groupId>
+            <artifactId>javax.mail</artifactId>
+            <version>1.6.2</version>
+        </dependency>
+
+        <!-- Jackson for JSON serialization -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.2</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+            <version>2.15.2</version>
+        </dependency>
+        
+        <!-- Jackson YAML for template parsing -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.dataformat</groupId>
+            <artifactId>jackson-dataformat-yaml</artifactId>
+            <version>2.15.2</version>
+        </dependency>
+        
+        <!-- Stripe Java SDK for payment processing -->
+        <dependency>
+            <groupId>com.stripe</groupId>
+            <artifactId>stripe-java</artifactId>
+            <version>25.13.0</version>
+        </dependency>
+
+        <!-- Caffeine Cache for high-performance caching -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+            <version>3.1.8</version>
+        </dependency>
+
+        <!-- JMH for performance benchmarking -->
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-core</artifactId>
+            <version>1.37</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.openjdk.jmh</groupId>
+            <artifactId>jmh-generator-annprocess</artifactId>
+            <version>1.37</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Spring Boot Dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <!-- OAuth2 Client for Google Authentication -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-client</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-jpa</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <version>2.2.224</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.1</version>
+        </dependency>
+
+        <!-- JWT Dependencies -->
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>0.12.3</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>0.12.3</version>
+            <scope>runtime</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>0.12.3</version>
+            <scope>runtime</scope>
+        </dependency>
+
+        <!-- Lombok -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>1.18.30</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Redis Client -->
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${redis.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        
+        <!-- AWS SDK for S3 plugin storage -->
+        <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-s3</artifactId>
+            <version>1.12.610</version>
+        </dependency>
+        
+        <!-- MinIO Client for S3-compatible storage -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.7</version>
+        </dependency>
+
+        <!-- Spring Boot Test -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <version>${spring.boot.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-test</artifactId>
+            <version>${spring.security.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Embedded Redis for testing -->
+        <dependency>
+            <groupId>it.ozimov</groupId>
+            <artifactId>embedded-redis</artifactId>
+            <version>0.7.3</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-simple</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        
+        <!-- TestContainers for integration testing -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>1.19.3</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>1.19.3</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>1.19.3</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- WireMock for API contract testing -->
+        <dependency>
+            <groupId>com.github.tomakehurst</groupId>
+            <artifactId>wiremock-jre8</artifactId>
+            <version>2.35.1</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- REST Assured for API testing -->
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>rest-assured</artifactId>
+            <version>5.4.0</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.rest-assured</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>5.4.0</version>
+            <scope>test</scope>
+        </dependency>
+        
+        
+        <!-- Awaitility for async testing -->
+        <dependency>
+            <groupId>org.awaitility</groupId>
+            <artifactId>awaitility</artifactId>
+            <version>4.2.0</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- AssertJ for fluent assertions -->
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.24.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Hamcrest for MockMvc and other test matchers -->
+        <dependency>
+            <groupId>org.hamcrest</groupId>
+            <artifactId>hamcrest</artifactId>
+            <version>2.2</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Chaos Monkey for Spring Boot -->
+        <dependency>
+            <groupId>de.codecentric</groupId>
+            <artifactId>chaos-monkey-spring-boot</artifactId>
+            <version>3.0.1</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- JsonPath for JSON testing -->
+        <dependency>
+            <groupId>com.jayway.jsonpath</groupId>
+            <artifactId>json-path</artifactId>
+            <version>2.8.0</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- OpenAPI Schema Validator -->
+        <dependency>
+            <groupId>com.atlassian.oai</groupId>
+            <artifactId>swagger-request-validator-core</artifactId>
+            <version>2.39.0</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Spring WebFlux for WebClient in tests -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+            <version>${spring.boot.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Monitoring and Observability Dependencies -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+            <version>${spring.boot.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+            <version>1.12.0</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-core</artifactId>
+            <version>1.12.0</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.32.0</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+            <version>1.32.0</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-jaeger</artifactId>
+            <version>1.32.0</version>
+        </dependency>
+        
+        <!-- Commented out due to version compatibility issues
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-spring-boot-starter</artifactId>
+            <version>1.32.0-alpha</version>
+        </dependency>
+        -->
+        
+        <!-- Additional OpenTelemetry dependencies for distributed tracing -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <version>${opentelemetry.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-zipkin</artifactId>
+            <version>${opentelemetry.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry.semconv</groupId>
+            <artifactId>opentelemetry-semconv</artifactId>
+            <version>${opentelemetry.semconv.version}</version>
+        </dependency>
+        
+        <!-- Commented out due to version compatibility issues
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-instrumentation-api</artifactId>
+            <version>${opentelemetry.instrumentation.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-instrumentation-api-incubator</artifactId>
+            <version>${opentelemetry.instrumentation.version}</version>
+        </dependency>
+        -->
+        
+        <!-- OpenTelemetry testing dependencies -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <version>${opentelemetry.version}</version>
+            <scope>test</scope>
+        </dependency>
+        
+        <!-- Temporarily commented out due to version issues
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-spring-webmvc-6.0</artifactId>
+            <version>${opentelemetry.instrumentation.version}</version>
+        </dependency>
+        
+        <dependency>
+            <groupId>io.opentelemetry.instrumentation</groupId>
+            <artifactId>opentelemetry-spring-web-3.1</artifactId>
+            <version>${opentelemetry.instrumentation.version}</version>
+        </dependency>
+        -->
+        
+        <dependency>
+            <groupId>net.logstash.logback</groupId>
+            <artifactId>logstash-logback-encoder</artifactId>
+            <version>7.4</version>
+        </dependency>
+        
+        <!-- OpenAPI 3.0 Documentation Dependencies -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>2.3.0</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-common</artifactId>
+            <version>2.3.0</version>
+        </dependency>
+
+        <!-- Error Prone Core -->
+        <dependency>
+            <groupId>com.google.errorprone</groupId>
+            <artifactId>error_prone_core</artifactId>
+            <version>${errorprone.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <!-- Google Java Format -->
+        <dependency>
+            <groupId>com.google.googlejavaformat</groupId>
+            <artifactId>google-java-format</artifactId>
+            <version>${google.java.format.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        
+        <!-- OpenAPI Generator for Client SDKs -->
+        <dependency>
+            <groupId>org.openapitools</groupId>
+            <artifactId>openapi-generator-maven-plugin</artifactId>
+            <version>7.2.0</version>
+            <scope>provided</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-simple</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <!-- Force SLF4J API version to 2.0.9 to match logback-classic 1.4.x and Spring Boot 3.x -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>2.0.9</version>
+            <scope>compile</scope>
+        </dependency>
+        
+        
+
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+            <version>9.22.3</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <testSourceDirectory>tests</testSourceDirectory>
+        
+        <plugins>
+            <!-- Build Helper Plugin to add multiple source directories -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <version>3.4.0</version>
+                <executions>
+                    <execution>
+                        <id>add-source</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>core</source>
+                                <source>plugins</source>
+                                <source>memory</source>
+                                <source>interface</source>
+                                <source>cli</source>
+                                <source>api</source>
+                                <source>consciousness</source>
+                                <source>editions</source>
+                            </sources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- Maven Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+                <configuration>
+                    <source>17</source>
+                    <target>17</target>
+                    <parameters>true</parameters>
+                    <release>17</release>
+                </configuration>
+            </plugin>
+            
+            <!-- Maven Surefire Plugin for unit testing with optimized parallel execution -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <!-- Parallel execution at class level for better isolation -->
+                    <parallel>classes</parallel>
+                    <!-- Use 75% of available cores (12 * 0.75 = 9) -->
+                    <threadCount>9</threadCount>
+                    <!-- Fork JVMs based on CPU cores for memory isolation -->
+                    <forkCount>3</forkCount>
+                    <reuseForks>true</reuseForks>
+                    <!-- Increased heap per fork for parallel execution with Java 24 + Mockito compatibility -->
+                    <argLine>-Xmx2048m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:+EnableDynamicAgentLoading -Dnet.bytebuddy.experimental=true --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</argLine>
+                    <!-- Thread safety and timeout configurations -->
+                    <perCoreThreadCount>true</perCoreThreadCount>
+                    <threadCountClasses>3</threadCountClasses>
+                    <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
+                    <systemPropertyVariables>
+                        <spring.profiles.active>test</spring.profiles.active>
+                        <junit.jupiter.execution.parallel.enabled>true</junit.jupiter.execution.parallel.enabled>
+                        <junit.jupiter.execution.parallel.mode.default>concurrent</junit.jupiter.execution.parallel.mode.default>
+                        <junit.jupiter.execution.parallel.mode.classes.default>concurrent</junit.jupiter.execution.parallel.mode.classes.default>
+                    </systemPropertyVariables>
+                    <includes>
+                        <include>**/*Test.java</include>
+                        <include>**/*Tests.java</include>
+                    </includes>
+                    <excludes>
+                        <!-- Standard test category exclusions -->
+                        <exclude>**/*IntegrationTest.java</exclude>
+                        <exclude>**/*PerformanceTest.java</exclude>
+                        <exclude>**/*ContractTest.java</exclude>
+                        <exclude>**/*SecurityTest.java</exclude>
+                        <exclude>**/*ChaosTest.java</exclude>
+                        
+                        <!-- Machine Learning and AI pattern exclusions -->
+                        <exclude>**/FederatedLearning*Test.java</exclude>
+                        <exclude>**/PersonalPattern*Test.java</exclude>
+                        <exclude>**/SlidingWindow*Test.java</exclude>
+                        
+                        <!-- Memory and analysis pattern exclusions -->
+                        <exclude>**/ElasticWeightConsolidation*Test.java</exclude>
+                        <exclude>**/InterventionalAnalysisEngine*Test.java</exclude>
+                        <exclude>**/CausalGraphConstruction*Test.java</exclude>
+                        <exclude>**/DifferentialPrivacyManager*Test.java</exclude>
+                        <exclude>**/SessionMemoryConsolidation*Test.java</exclude>
+                        <exclude>**/FederatedMemoryCoordination*Test.java</exclude>
+                        <exclude>**/PrivacyBudgetManagement*Test.java</exclude>
+                        
+                        <!-- Temporal and attention mechanism exclusions -->
+                        <exclude>**/TemporalPositionEncoder*Test.java</exclude>
+                        <exclude>**/MultiHeadTemporalAttention*Test.java</exclude>
+                        <exclude>**/DynamicAttentionAdapter*Test.java</exclude>
+                        <exclude>**/TemporalConstraintProcessor*Test.java</exclude>
+                        
+                        <!-- High-resource and long-running test exclusions -->
+                        <exclude>**/MultiTenantIsolation*Test.java</exclude>
+                        <exclude>**/EdgeCasePerformance*Test.java</exclude>
+                        <exclude>**/MarkdownRenderingPerformance*Test.java</exclude>
+                        
+                        <!-- Tests with excessive Thread.sleep (>1 second) - regex pattern -->
+                        <exclude>**/LiveDagPreview*Test.java</exclude>
+                        <exclude>**/SessionContinuity*Test.java</exclude>
+                        
+                        <!-- Tests with high iteration counts (>500 iterations) -->
+                        <exclude>**/SecureTokenSubstitutor*Test.java</exclude>
+                        <exclude>**/ComprehensiveMiddleware*Test.java</exclude>
+                        
+                        <!-- Disabled or flaky tests -->
+                        <exclude>**/*.disabled</exclude>
+                        <exclude>**/Suggestion*Test.java</exclude>
+                        <exclude>**/MemoryReconciliationService*Test.java</exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            
+            <!-- Maven Failsafe Plugin for integration testing -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.0.0</version>
+                <configuration>
+                    <includes>
+                        <include>**/*IntegrationTest.java</include>
+                        <include>**/*IT.java</include>
+                    </includes>
+                    <systemPropertyVariables>
+                        <spring.profiles.active>integration-test</spring.profiles.active>
+                    </systemPropertyVariables>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- JaCoCo Plugin for code coverage with engine-core specific gate -->
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.11</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>prepare-agent</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>test</phase>
+                        <goals>
+                            <goal>report</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>check</id>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>BUNDLE</element>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <!-- Engine-core specific coverage gate -->
+                                <rule>
+                                    <element>PACKAGE</element>
+                                    <includes>
+                                        <include>core.*</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>INSTRUCTION</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.80</minimum>
+                                        </limit>
+                                        <limit>
+                                            <counter>BRANCH</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.75</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- SpotBugs Plugin for static analysis -->
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>4.8.2.0</version>
+                <configuration>
+                    <effort>Max</effort>
+                    <threshold>Low</threshold>
+                    <xmlOutput>true</xmlOutput>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- PMD Plugin for code quality -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-pmd-plugin</artifactId>
+                <version>3.21.2</version>
+                <configuration>
+                    <rulesets>
+                        <ruleset>/category/java/bestpractices.xml</ruleset>
+                        <ruleset>/category/java/codestyle.xml</ruleset>
+                        <ruleset>/category/java/design.xml</ruleset>
+                        <ruleset>/category/java/errorprone.xml</ruleset>
+                        <ruleset>/category/java/performance.xml</ruleset>
+                        <ruleset>/category/java/security.xml</ruleset>
+                    </rulesets>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- OpenAPI Generator Plugin - moved to profile to avoid Docker build issues -->
+            
+            <!-- Spring Boot Maven Plugin -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <version>${spring.boot.version}</version>
+                <configuration>
+                    <mainClass>api.ObvianApplication</mainClass>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>repackage</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- Maven Shade Plugin for fat JAR -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <finalName>obvian-cli</finalName>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>cli.ObvianCli</mainClass>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- Spotless Plugin for code formatting -->
+            <plugin>
+                <groupId>com.diffplug.spotless</groupId>
+                <artifactId>spotless-maven-plugin</artifactId>
+                <version>${spotless.version}</version>
+                <configuration>
+                    <java>
+                        <googleJavaFormat>
+                            <version>${google.java.format.version}</version>
+                            <style>GOOGLE</style>
+                            <reflowLongStrings>true</reflowLongStrings>
+                            <formatJavadoc>false</formatJavadoc>
+                        </googleJavaFormat>
+                        <removeUnusedImports />
+                        <formatAnnotations />
+                        <trimTrailingWhitespace />
+                        <endWithNewline />
+                        <licenseHeader>
+                            <content>/* Copyright (c) 2025 Rishabh Pathak. Licensed under the MIT License. */</content>
+                        </licenseHeader>
+                    </java>
+                    <formats>
+                        <format>
+                            <includes>
+                                <include>*.md</include>
+                                <include>.gitignore</include>
+                            </includes>
+                            <trimTrailingWhitespace/>
+                            <endWithNewline/>
+                            <indent>
+                                <spaces>true</spaces>
+                                <spacesPerTab>2</spacesPerTab>
+                            </indent>
+                        </format>
+                    </formats>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Checkstyle Plugin for code style validation -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.3.1</version>
+                <configuration>
+                    <configLocation>google_checks.xml</configLocation>
+                    <consoleOutput>true</consoleOutput>
+                    <failsOnError>true</failsOnError>
+                    <linkXRef>false</linkXRef>
+                    <violationSeverity>warning</violationSeverity>
+                    <includeTestSourceDirectory>true</includeTestSourceDirectory>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>${checkstyle.version}</version>
+                    </dependency>
+                </dependencies>
+                <executions>
+                    <execution>
+                        <id>validate</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Error Prone dependency -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.6.1</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.google.errorprone</groupId>
+                        <artifactId>error_prone_core</artifactId>
+                        <version>${errorprone.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+
+            <!-- OWASP Dependency Check Plugin for security scanning -->
+            <plugin>
+                <groupId>org.owasp</groupId>
+                <artifactId>dependency-check-maven</artifactId>
+                <version>9.0.7</version>
+                <configuration>
+                    <!-- NVD API Key configuration -->
+                    <nvdApiKey>${env.NVD_API_KEY}</nvdApiKey>
+                    <nvdApiDelay>4000</nvdApiDelay>
+                    <nvdMaxRetryCount>10</nvdMaxRetryCount>
+                    <nvdValidForHours>4</nvdValidForHours>
+                    
+                    <!-- Output formats -->
+                    <formats>
+                        <format>XML</format>
+                        <format>HTML</format>
+                        <format>JSON</format>
+                        <format>SARIF</format>
+                    </formats>
+                    
+                    <!-- Fail build on CVSS score -->
+                    <failBuildOnCVSS>7.0</failBuildOnCVSS>
+                    
+                    <!-- Skip test dependencies -->
+                    <skipTestScope>false</skipTestScope>
+                    
+                    <!-- Suppression file for false positives -->
+                    <suppressionFiles>
+                        <suppressionFile>owasp-suppressions.xml</suppressionFile>
+                    </suppressionFiles>
+                    
+                    <!-- Assembly analyzer (can be slow, disable if needed) -->
+                    <assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
+                    
+                    <!-- Archive analyzer settings -->
+                    <zipExtensions>zip,tar,gz,tgz,bz2,tbz2</zipExtensions>
+                    
+                    <!-- Database settings -->
+                    <autoUpdate>true</autoUpdate>
+                    <cveValidForHours>4</cveValidForHours>
+                    
+                    <!-- Performance optimizations -->
+                    <bundleAuditAnalyzerEnabled>false</bundleAuditAnalyzerEnabled>
+                    <retireJsAnalyzerEnabled>false</retireJsAnalyzerEnabled>
+                    <nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
+                    <nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+                </configuration>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- Fast Tests Profile - Default profile with JUnit 5 tag-based filtering -->
+        <profile>
+            <id>fast-tests</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <!-- Optimized parallel execution for fast feedback -->
+                            <parallel>all</parallel>
+                            <threadCount>12</threadCount>
+                            <forkCount>4</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx768m -XX:+UseG1GC -XX:MaxGCPauseMillis=50 -XX:+DisableExplicitGC -XX:+EnableDynamicAgentLoading -Dnet.bytebuddy.experimental=true --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</argLine>
+                            <forkedProcessTimeoutInSeconds>120</forkedProcessTimeoutInSeconds>
+                            <perCoreThreadCount>true</perCoreThreadCount>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>test</spring.profiles.active>
+                                <!-- Enable JUnit 5 parallel execution -->
+                                <junit.jupiter.execution.parallel.enabled>true</junit.jupiter.execution.parallel.enabled>
+                                <junit.jupiter.execution.parallel.mode.default>concurrent</junit.jupiter.execution.parallel.mode.default>
+                                <junit.jupiter.execution.parallel.mode.classes.default>concurrent</junit.jupiter.execution.parallel.mode.classes.default>
+                                <junit.jupiter.execution.parallel.config.strategy>dynamic</junit.jupiter.execution.parallel.config.strategy>
+                                <junit.jupiter.execution.parallel.config.dynamic.factor>2.5</junit.jupiter.execution.parallel.config.dynamic.factor>
+                                <junit.jupiter.execution.parallel.config.custom.class>org.junit.platform.engine.support.hierarchical.ForkJoinPoolHierarchicalTestExecutorService</junit.jupiter.execution.parallel.config.custom.class>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - exclude slow tests, include all untagged tests -->
+                            <excludedGroups>slow,integration,performance,security,contract,external,database</excludedGroups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Memory and AI Tests Profile -->
+        <profile>
+            <id>memory-ai-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/FederatedLearning*Test.java</include>
+                                <include>**/PersonalPattern*Test.java</include>
+                                <include>**/SlidingWindow*Test.java</include>
+                                <include>**/ElasticWeightConsolidation*Test.java</include>
+                                <include>**/InterventionalAnalysisEngine*Test.java</include>
+                                <include>**/CausalGraphConstruction*Test.java</include>
+                                <include>**/DifferentialPrivacyManager*Test.java</include>
+                                <include>**/SessionMemoryConsolidation*Test.java</include>
+                                <include>**/FederatedMemoryCoordination*Test.java</include>
+                                <include>**/PrivacyBudgetManagement*Test.java</include>
+                                <include>**/TemporalPositionEncoder*Test.java</include>
+                                <include>**/MultiHeadTemporalAttention*Test.java</include>
+                                <include>**/DynamicAttentionAdapter*Test.java</include>
+                                <include>**/TemporalConstraintProcessor*Test.java</include>
+                            </includes>
+                            <excludes>
+                                <exclude>**/*.disabled</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Thread Sleep Tests Profile -->
+        <profile>
+            <id>thread-sleep-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/LiveDagPreview*Test.java</include>
+                                <include>**/SessionContinuity*Test.java</include>
+                                <include>**/InterventionalAnalysisEngine*Test.java</include>
+                                <include>**/CausalGraphConstruction*Test.java</include>
+                                <include>**/SessionMemoryConsolidation*Test.java</include>
+                            </includes>
+                            <excludes>
+                                <exclude>**/*.disabled</exclude>
+                            </excludes>
+                            <!-- Increase timeout for tests with legitimate Thread.sleep usage -->
+                            <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- High Iteration Tests Profile -->
+        <profile>
+            <id>high-iteration-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/SecureTokenSubstitutor*Test.java</include>
+                                <include>**/ComprehensiveMiddleware*Test.java</include>
+                                <include>**/MarkdownRenderingPerformance*Test.java</include>
+                                <include>**/InterfaceSyncService*Test.java</include>
+                            </includes>
+                            <excludes>
+                                <exclude>**/*.disabled</exclude>
+                            </excludes>
+                            <!-- Increase memory and timeout for high iteration tests -->
+                            <argLine>-Xmx2g -XX:MaxMetaspaceSize=512m</argLine>
+                            <forkedProcessTimeoutInSeconds>600</forkedProcessTimeoutInSeconds>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- CI Pipeline Profile - Optimized for continuous integration -->
+        <profile>
+            <id>ci-pipeline</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <!-- Resource-intensive exclusions for CI -->
+                                <exclude>**/FederatedLearning*Test.java</exclude>
+                                <exclude>**/PersonalPattern*Test.java</exclude>
+                                <exclude>**/ElasticWeightConsolidation*Test.java</exclude>
+                                <exclude>**/InterventionalAnalysisEngine*Test.java</exclude>
+                                <exclude>**/CausalGraphConstruction*Test.java</exclude>
+                                <exclude>**/DifferentialPrivacyManager*Test.java</exclude>
+                                <exclude>**/SessionMemoryConsolidation*Test.java</exclude>
+                                <exclude>**/EdgeCasePerformance*Test.java</exclude>
+                                <exclude>**/MarkdownRenderingPerformance*Test.java</exclude>
+                                <exclude>**/SecureTokenSubstitutor*Test.java</exclude>
+                                <exclude>**/ComprehensiveMiddleware*Test.java</exclude>
+                                <exclude>**/*.disabled</exclude>
+                                <exclude>**/Suggestion*Test.java</exclude>
+                                <exclude>**/MemoryReconciliationService*Test.java</exclude>
+                                <exclude>**/*ChaosTest.java</exclude>
+                                <exclude>**/*SecurityTest.java</exclude>
+                                <exclude>**/*PerformanceTest.java</exclude>
+                            </excludes>
+                            <!-- Optimized CI settings -->
+                            <parallel>classes</parallel>
+                            <threadCount>2</threadCount>
+                            <forkCount>1C</forkCount>
+                            <reuseForks>false</reuseForks>
+                            <argLine>-Xmx1g -XX:MaxMetaspaceSize=256m</argLine>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Refactoring Unit Tests Profile - Ultra-fast unit tests only -->
+        <profile>
+            <id>unit-only</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <!-- Ultra-fast parallel execution -->
+                            <parallel>all</parallel>
+                            <threadCount>16</threadCount>
+                            <forkCount>6</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=50 -XX:+DisableExplicitGC</argLine>
+                            <forkedProcessTimeoutInSeconds>60</forkedProcessTimeoutInSeconds>
+                            
+                            <!-- JUnit 5 tag-based filtering - only unit tests -->
+                            <includedGroups>unit,refactoring-example</includedGroups>
+                            <excludedGroups>slow,integration,performance,security,contract,external,database</excludedGroups>
+                            
+                            <!-- Include only unit test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                            </includes>
+                            <excludes>
+                                <exclude>**/*IntegrationTest.java</exclude>
+                                <exclude>**/*ContractTest.java</exclude>
+                                <exclude>**/*PerformanceTest.java</exclude>
+                                <exclude>**/*SecurityTest.java</exclude>
+                                <exclude>**/*.disabled</exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Contract Tests Profile - Interface contract validation -->
+        <profile>
+            <id>contract-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <parallel>classes</parallel>
+                            <threadCount>4</threadCount>
+                            <forkCount>2</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx1g -XX:+UseG1GC</argLine>
+                            
+                            <!-- JUnit 5 tag-based filtering - only contract tests -->
+                            <includedGroups>contract</includedGroups>
+                            
+                            <!-- Include only contract test files -->
+                            <includes>
+                                <include>**/*ContractTest.java</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Regression Tests Profile - Backwards compatibility tests -->
+        <profile>
+            <id>regression-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <parallel>classes</parallel>
+                            <threadCount>2</threadCount>
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
+                            <argLine>-Xmx2g -XX:+UseG1GC</argLine>
+                            <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
+                            
+                            <!-- JUnit 5 tag-based filtering - only regression tests -->
+                            <includedGroups>regression,backwards-compatibility</includedGroups>
+                            
+                            <!-- Include regression test files -->
+                            <includes>
+                                <include>**/*BackwardsCompatibilityTest.java</include>
+                                <include>**/*RegressionTest.java</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Refactoring Validation Profile - Complete refactoring test suite -->
+        <profile>
+            <id>refactoring-validation</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <parallel>classes</parallel>
+                            <threadCount>4</threadCount>
+                            <forkCount>2</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx2g -XX:+UseG1GC -XX:MaxGCPauseMillis=100</argLine>
+                            <forkedProcessTimeoutInSeconds>600</forkedProcessTimeoutInSeconds>
+                            
+                            <!-- Include all refactoring-related test groups -->
+                            <includedGroups>unit,contract,regression,refactoring-example,backwards-compatibility</includedGroups>
+                            <excludedGroups>slow,external</excludedGroups>
+                            
+                            <!-- Include refactoring test files -->
+                            <includes>
+                                <include>**/refactoring/**/*Test.java</include>
+                                <include>**/*ContractTest.java</include>
+                                <include>**/*BackwardsCompatibilityTest.java</include>
+                                <include>**/*RegressionTest.java</include>
+                            </includes>
+                        </configuration>
+                    </plugin>
+                    
+                    <!-- JaCoCo for coverage reporting -->
+                    <plugin>
+                        <groupId>org.jacoco</groupId>
+                        <artifactId>jacoco-maven-plugin</artifactId>
+                        <version>0.8.8</version>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>prepare-agent</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>report</id>
+                                <phase>test</phase>
+                                <goals>
+                                    <goal>report</goal>
+                                </goals>
+                            </execution>
+                            <execution>
+                                <id>check</id>
+                                <goals>
+                                    <goal>check</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <rule>
+                                            <element>BUNDLE</element>
+                                            <limits>
+                                                <limit>
+                                                    <counter>LINE</counter>
+                                                    <value>COVEREDRATIO</value>
+                                                    <minimum>0.90</minimum>
+                                                </limit>
+                                            </limits>
+                                        </rule>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for generating OpenAPI documentation -->
+        <profile>
+            <id>generate-docs</id>
+            <activation>
+                <property>
+                    <name>generate.docs</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <!-- SpringDoc OpenAPI Maven Plugin -->
+                    <plugin>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-maven-plugin</artifactId>
+                        <version>${spring.boot.version}</version>
+                        <executions>
+                            <execution>
+                                <id>pre-integration-test</id>
+                                <goals>
+                                    <goal>start</goal>
+                                </goals>
+                                <configuration>
+                                    <skip>false</skip>
+                                    <wait>5000</wait>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>post-integration-test</id>
+                                <goals>
+                                    <goal>stop</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    
+                    <!-- Exec Maven Plugin for running applications -->
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>exec-maven-plugin</artifactId>
+                        <version>3.1.0</version>
+                        <configuration>
+                            <!-- Default configuration for mvn exec:java -->
+                            <mainClass>api.ObvianApplication</mainClass>
+                            <commandlineArgs></commandlineArgs>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>download-openapi-spec</id>
+                                <phase>integration-test</phase>
+                                <goals>
+                                    <goal>exec</goal>
+                                </goals>
+                                <configuration>
+                                    <executable>curl</executable>
+                                    <arguments>
+                                        <argument>-s</argument>
+                                        <argument>-o</argument>
+                                        <argument>${project.basedir}/docs/api/openapi-generated.yaml</argument>
+                                        <argument>http://localhost:8080/v3/api-docs.yaml</argument>
+                                    </arguments>
+                                    <successCodes>
+                                        <successCode>0</successCode>
+                                        <successCode>7</successCode> <!-- Connection refused - app not running -->
+                                    </successCodes>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    
+                    <!-- OpenAPI Generator Plugin -->
+                    <plugin>
+                        <groupId>org.openapitools</groupId>
+                        <artifactId>openapi-generator-maven-plugin</artifactId>
+                        <version>7.2.0</version>
+                        <executions>
+                            <execution>
+                                <id>generate-openapi-spec</id>
+                                <goals>
+                                    <goal>generate</goal>
+                                </goals>
+                                <phase>compile</phase>
+                                <configuration>
+                                    <inputSpec>${project.basedir}/docs/api/openapi.yaml</inputSpec>
+                                    <generatorName>openapi-yaml</generatorName>
+                                    <output>${project.build.directory}/generated-docs</output>
+                                    <skipValidateSpec>false</skipValidateSpec>
+                                    <generateApiTests>false</generateApiTests>
+                                    <generateModelTests>false</generateModelTests>
+                                    <generateApiDocumentation>true</generateApiDocumentation>
+                                    <generateModelDocumentation>true</generateModelDocumentation>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for unit tests only - strictest fast filter with JUnit 5 tags -->
+        <profile>
+            <id>unit-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <!-- Maximum parallel execution for unit tests -->
+                            <parallel>classes</parallel>
+                            <threadCount>8</threadCount>
+                            <forkCount>4</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx512m</argLine>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>test</spring.profiles.active>
+                                <!-- Enable JUnit 5 parallel execution -->
+                                <junit.jupiter.execution.parallel.enabled>true</junit.jupiter.execution.parallel.enabled>
+                                <junit.jupiter.execution.parallel.mode.default>concurrent</junit.jupiter.execution.parallel.mode.default>
+                                <junit.jupiter.execution.parallel.mode.classes.default>concurrent</junit.jupiter.execution.parallel.mode.classes.default>
+                                <junit.jupiter.execution.parallel.config.strategy>dynamic</junit.jupiter.execution.parallel.config.strategy>
+                                <junit.jupiter.execution.parallel.config.dynamic.factor>2.0</junit.jupiter.execution.parallel.config.dynamic.factor>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - only fast unit tests, include all untagged tests -->
+                            <excludedGroups>slow,integration,performance,security,contract,external,database</excludedGroups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for integration tests with JUnit 5 tags -->
+        <profile>
+            <id>integration-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <!-- Reduced parallelism for integration tests -->
+                            <parallel>classes</parallel>
+                            <threadCount>2</threadCount>
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
+                            <argLine>-Xmx2g</argLine>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>integration-test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                                <include>**/*IT.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - integration tests -->
+                            <groups>integration</groups>
+                            <excludedGroups>performance</excludedGroups>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <includes>
+                                <include>**/*IntegrationTest.java</include>
+                                <include>**/*IT.java</include>
+                            </includes>
+                            <systemPropertyVariables>
+                                <spring.profiles.active>integration-test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            <!-- JUnit 5 tag-based filtering for Failsafe -->
+                            <groups>integration</groups>
+                            <excludedGroups>performance</excludedGroups>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for performance tests with JUnit 5 tags -->
+        <profile>
+            <id>performance-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <!-- Sequential execution for performance tests -->
+                            <parallel>none</parallel>
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
+                            <argLine>-Xmx4g -XX:+UseG1GC</argLine>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>performance-test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - performance tests only -->
+                            <groups>performance</groups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for security tests with JUnit 5 tags -->
+        <profile>
+            <id>security-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <parallel>classes</parallel>
+                            <threadCount>2</threadCount>
+                            <forkCount>1</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx1g</argLine>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>security-test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - security tests -->
+                            <groups>security</groups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for CI/CD - balanced test execution with JUnit 5 tags -->
+        <profile>
+            <id>ci</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <!-- Balanced parallel execution for CI -->
+                            <parallel>classes</parallel>
+                            <threadCount>2</threadCount>
+                            <forkCount>1</forkCount>
+                            <reuseForks>true</reuseForks>
+                            <argLine>-Xmx1g</argLine>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - fast tests + essential integration -->
+                            <groups>fast | (integration &amp; !slow)</groups>
+                            <excludedGroups>performance</excludedGroups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <!-- Profile for comprehensive testing with JUnit 5 tags -->
+        <profile>
+            <id>full-tests</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <!-- Conservative parallel execution for comprehensive tests -->
+                            <parallel>classes</parallel>
+                            <threadCount>2</threadCount>
+                            <forkCount>1</forkCount>
+                            <reuseForks>false</reuseForks>
+                            <argLine>-Xmx2g</argLine>
+                            
+                            <!-- System properties -->
+                            <systemPropertyVariables>
+                                <spring.profiles.active>test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            
+                            <!-- Include all test files -->
+                            <includes>
+                                <include>**/*Test.java</include>
+                                <include>**/*Tests.java</include>
+                            </includes>
+                            
+                            <!-- JUnit 5 tag-based filtering - all tests except performance -->
+                            <excludedGroups>performance</excludedGroups>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-failsafe-plugin</artifactId>
+                        <version>3.0.0</version>
+                        <configuration>
+                            <includes>
+                                <include>**/*IntegrationTest.java</include>
+                                <include>**/*IT.java</include>
+                            </includes>
+                            <systemPropertyVariables>
+                                <spring.profiles.active>integration-test</spring.profiles.active>
+                            </systemPropertyVariables>
+                            <!-- JUnit 5 tag-based filtering for Failsafe -->
+                            <excludedGroups>performance</excludedGroups>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <goals>
+                                    <goal>integration-test</goal>
+                                    <goal>verify</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+
+</project>

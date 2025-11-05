@@ -1,0 +1,67 @@
+```mermaid
+flowchart TB
+    subgraph "Natural Language Input"
+        NL[User Prompt]
+    end
+
+    subgraph "Parsing Layer"
+        NL --> PP[PromptParser<br/>Regex-based Intent Extraction]
+        PP --> IS[IntentSpec<br/>Structured Workflow Intent]
+    end
+
+    subgraph "Petri-Net Pipeline (P3-Net)"
+        IS --> PB[PetriNetBuilder<br/>Grammar-based Construction]
+        PB --> PN[PetriNet Model<br/>Places, Transitions, Arcs]
+        PN --> PV[PetriNetValidator<br/>983 LOC Formal Verification]
+        PV --> |Deadlock Detection| PV
+        PV --> |Reachability Analysis| PV
+        PV --> |Liveness Check| PV
+        PV --> |Boundedness Check| PV
+        PN --> PS[PetriTokenSimulator<br/>521 LOC Token Flow]
+        PN --> PP2[PetriToDagProjector<br/>368 LOC Transitive Reduction]
+        PP2 --> DAG[DAG Model]
+    end
+
+    subgraph "DAG Execution Pipeline"
+        IS --> DB[DagBuilder<br/>Direct DAG Construction]
+        DB --> DAG
+        DAG --> DV[DagValidator<br/>Structural Validation]
+        DV --> DE[StandardDagExecutorService<br/>Level-Based Parallel Execution]
+        DE --> TP[ThreadPoolExecutor<br/>cores/2 to cores threads]
+        TP --> PR[PluginRouter<br/>Route to Plugin Implementation]
+        PR --> PX[Plugin Execution<br/>Email, File, Slack, Reminder]
+        PX --> MS[MemoryStore<br/>Persist Results & Context]
+        MS --> TR[Trace Logger<br/>Execution History]
+    end
+
+    subgraph "Monitoring & Observability"
+        DE --> MC[MetricsCollector<br/>Prometheus Metrics]
+        DE --> TL[TraceLogger<br/>OpenTelemetry Traces]
+        PS --> VT[VisualTraceService<br/>Real-time Animation]
+        VT --> WS[WebSocket Updates]
+    end
+
+    subgraph "API Layer"
+        PC[PetriController<br/>873 LOC REST API]
+        DC[DagController<br/>DAG Execution API]
+        PC --> PB
+        PC --> PV
+        PC --> PS
+        PC --> PP2
+        DC --> DB
+        DC --> DE
+    end
+
+    subgraph "Frontend Visualization"
+        WS --> UI[React SPA<br/>Dual-View Cytoscape]
+        UI --> PNV[Petri-Net View<br/>Token Animation]
+        UI --> DGV[DAG View<br/>Cross-Highlighting]
+    end
+
+    classDef production fill:#90EE90,stroke:#228B22,stroke-width:2px
+    classDef partial fill:#FFD700,stroke:#FF8C00,stroke-width:2px
+    classDef missing fill:#FFB6C1,stroke:#DC143C,stroke-width:2px
+
+    class PV,PS,PP2,DE,PR,PX,MS,PC production
+    class PP,DB,DV,UI partial
+    class TP,MC,TL missing

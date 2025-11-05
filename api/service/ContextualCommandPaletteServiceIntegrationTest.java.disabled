@@ -1,0 +1,402 @@
+package tests.api.service;
+
+import api.config.CommandPaletteConfig;
+import api.model.CommandAnalyticsResponse;
+import api.model.CommandSuggestionRequest;
+import api.model.CommandSuggestionResponse;
+import api.service.ContextualCommandPaletteService;
+import api.service.UnifiedContextService;
+import core.*;
+import memory.MemoryStore;
+import memory.MemoryStoreInterface;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.messaging.simp.SimpMessageSendingOperations;
+import org.springframework.test.context.ActiveProfiles;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * Integration tests for ContextualCommandPaletteService with Spring context.
+ * 
+ * Tests the service in a full Spring environment with actual dependencies
+ * to verify proper configuration, bean wiring, and end-to-end functionality.
+ * 
+ * Patent Alignment: Validates integration of Product Patent 25 (ContextualCommandPalette)
+ * within the complete Spring application context.
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.1d
+ */
+@SpringBootTest(classes = {
+    CommandPaletteConfig.class,
+    ContextualCommandPaletteService.class
+})
+@ActiveProfiles("test")
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@DisplayName("ContextualCommandPaletteService Integration Tests")
+class ContextualCommandPaletteServiceIntegrationTest {
+
+    @Autowired
+    private ContextualCommandPaletteService service;
+    
+    @Autowired
+    private BehavioralLearningEngine learningEngine;
+    
+    @Autowired
+    private CommandPaletteConfig.CommandPaletteProperties properties;
+    
+    @MockBean
+    private UnifiedContextService unifiedContextService;
+    
+    @MockBean
+    private SimpMessageSendingOperations messagingTemplate;
+    
+    @Autowired
+    private MemoryStoreInterface memoryStore;
+    
+    private String testUserId;
+    
+    @BeforeEach
+    void setUp() {
+        testUserId = "integration-test-user-" + System.currentTimeMillis();
+        
+        // Clear any existing data for the test user
+        learningEngine.clearUserData(testUserId);
+    }
+    
+    @Test
+    @DisplayName("Should autowire all dependencies correctly")
+    void shouldAutowireAllDependenciesCorrectly() {
+        // Assert
+        assertThat(service).isNotNull();
+        assertThat(learningEngine).isNotNull();
+        assertThat(properties).isNotNull();
+        assertThat(memoryStore).isNotNull();
+        
+        // Verify configuration
+        assertThat(properties.getCacheTtlMinutes()).isPositive();
+        assertThat(properties.getSuggestionTimeoutMs()).isPositive();
+        assertThat(properties.getRequestRateLimit()).isPositive();
+        
+        // Verify learning engine is properly configured
+        assertThat(learningEngine.isEnabled()).isTrue();
+        assertThat(learningEngine.getConfiguration()).isNotNull();
+        assertThat(learningEngine.getConfiguration().isValidConfiguration()).isTrue();
+    }
+    
+    @Test
+    @DisplayName("Should perform end-to-end suggestion workflow")
+    void shouldPerformEndToEndSuggestionWorkflow() throws Exception {
+        // Phase 1: Record some command executions to build patterns
+        Map<String, Object> context = Map.of("workingDir", "/home/user/project");
+        
+        // Record multiple executions of git commands
+        CompletableFuture.allOf(
+            service.recordCommandExecution("git status", testUserId, InterfaceType.CLI, true, context),
+            service.recordCommandExecution("git add .", testUserId, InterfaceType.CLI, true, context),
+            service.recordCommandExecution("git commit -m 'test'", testUserId, InterfaceType.CLI, true, context),
+            service.recordCommandExecution("git push", testUserId, InterfaceType.CLI, true, context),
+            service.recordCommandExecution("git status", testUserId, InterfaceType.CLI, true, context)
+        ).get(5, TimeUnit.SECONDS);
+        
+        // Wait a moment for async learning to complete
+        Thread.sleep(100);
+        
+        // Phase 2: Request suggestions for partial input
+        CommandSuggestionRequest request = new CommandSuggestionRequest(
+            "git", testUserId, InterfaceType.CLI
+        );
+        request.setExecutionContext(context);
+        request.setMaxSuggestions(5);
+        request.setIncludeMetadata(true);
+        
+        CompletableFuture<CommandSuggestionResponse> responseFuture = service.getSuggestions(request);
+        CommandSuggestionResponse response = responseFuture.get(5, TimeUnit.SECONDS);
+        
+        // Assert
+        assertThat(response).isNotNull();
+        assertThat(response.isSuccessful()).isTrue();
+        assertThat(response.getUserId()).isEqualTo(testUserId);
+        assertThat(response.getInterfaceType()).isEqualTo(InterfaceType.CLI);
+        assertThat(response.getPartialInput()).isEqualTo("git");
+        assertThat(response.isLearningEnabled()).isTrue();
+        assertThat(response.getProcessingTimeMs()).isPositive();
+        assertThat(response.getConfiguration()).isNotNull();
+        
+        // Should have suggestions based on learned patterns
+        // Note: Actual suggestions depend on learning algorithm and pattern matching
+        // We test that the workflow completes successfully
+        assertThat(response.getTotalSuggestions()).isGreaterThanOrEqualTo(0);
+    }
+    
+    @Test
+    @DisplayName("Should generate analytics after learning period")
+    void shouldGenerateAnalyticsAfterLearningPeriod() throws Exception {
+        // Phase 1: Record diverse command executions
+        Map<String, Object> cliContext = Map.of("interface", "cli", "workingDir", "/project");
+        Map<String, Object> webContext = Map.of("interface", "web", "sessionId", "web123");
+        
+        // Record commands across different interfaces
+        CompletableFuture.allOf(
+            service.recordCommandExecution("git status", testUserId, InterfaceType.CLI, true, cliContext),
+            service.recordCommandExecution("git commit", testUserId, InterfaceType.CLI, true, cliContext),
+            service.recordCommandExecution("git push", testUserId, InterfaceType.CLI, false, cliContext), // Failed
+            service.recordCommandExecution("deploy app", testUserId, InterfaceType.WEB_UI, true, webContext),
+            service.recordCommandExecution("run tests", testUserId, InterfaceType.WEB_UI, true, webContext),
+            service.recordCommandExecution("git status", testUserId, InterfaceType.CLI, true, cliContext) // Repeat
+        ).get(5, TimeUnit.SECONDS);
+        
+        // Wait for async learning
+        Thread.sleep(200);
+        
+        // Phase 2: Request analytics
+        CompletableFuture<CommandAnalyticsResponse> analyticsResponseFuture = service.getCommandAnalytics(testUserId);
+        CommandAnalyticsResponse analyticsResponse = analyticsResponseFuture.get(5, TimeUnit.SECONDS);
+        
+        // Assert
+        assertThat(analyticsResponse).isNotNull();
+        assertThat(analyticsResponse.isSuccessful()).isTrue();
+        assertThat(analyticsResponse.getUserId()).isEqualTo(testUserId);
+        assertThat(analyticsResponse.getTotalPatterns()).isGreaterThan(0);
+        assertThat(analyticsResponse.getOverallSuccessRate()).isBetween(0.0, 1.0);
+        
+        // Should have learning metrics
+        CommandAnalyticsResponse.LearningMetricsDto learningMetrics = analyticsResponse.getLearningMetrics();
+        assertThat(learningMetrics).isNotNull();
+        assertThat(learningMetrics.isLearningEnabled()).isTrue();
+        assertThat(learningMetrics.isCrossInterfaceLearning()).isTrue();
+        assertThat(learningMetrics.getDataRetentionDays()).isEqualTo(properties.getDataRetentionDays());
+        
+        // Should have interface distribution
+        Map<String, Long> interfaceDistribution = analyticsResponse.getInterfaceDistribution();
+        if (interfaceDistribution != null && !interfaceDistribution.isEmpty()) {
+            assertThat(interfaceDistribution).containsKey("CLI");
+            assertThat(interfaceDistribution.get("CLI")).isPositive();
+        }
+    }
+    
+    @Test
+    @DisplayName("Should handle configuration updates correctly")
+    void shouldHandleConfigurationUpdatesCorrectly() throws Exception {
+        // Phase 1: Record initial commands
+        CompletableFuture.allOf(
+            service.recordCommandExecution("test command 1", testUserId, InterfaceType.CLI, true, null),
+            service.recordCommandExecution("test command 2", testUserId, InterfaceType.CLI, true, null)
+        ).get(5, TimeUnit.SECONDS);
+        
+        // Phase 2: Update configuration
+        LearningConfiguration newConfig = LearningConfiguration.builder()
+                .confidenceThreshold(0.8) // Higher threshold
+                .maxSuggestions(3)        // Fewer suggestions
+                .fuzzyMatchThreshold(0.9) // Higher fuzzy threshold
+                .crossInterfaceLearning(false) // Disable cross-interface
+                .build();
+        
+        CompletableFuture<Void> updateFuture = service.updateLearningConfiguration(testUserId, newConfig);
+        updateFuture.get(5, TimeUnit.SECONDS);
+        
+        // Phase 3: Verify configuration took effect
+        CommandSuggestionRequest request = new CommandSuggestionRequest(
+            "test", testUserId, InterfaceType.CLI
+        );
+        request.setIncludeMetadata(true);
+        
+        CompletableFuture<CommandSuggestionResponse> responseFuture = service.getSuggestions(request);
+        CommandSuggestionResponse response = responseFuture.get(5, TimeUnit.SECONDS);
+        
+        // Assert
+        assertThat(response).isNotNull();
+        assertThat(response.isSuccessful()).isTrue();
+        
+        if (response.getConfiguration() != null) {
+            assertThat(response.getConfiguration().get("confidenceThreshold")).isEqualTo(0.8);
+            assertThat(response.getConfiguration().get("maxSuggestions")).isEqualTo(3);
+            assertThat(response.getConfiguration().get("fuzzyMatchThreshold")).isEqualTo(0.9);
+        }
+        
+        // Should respect max suggestions limit
+        assertThat(response.getTotalSuggestions()).isLessThanOrEqualTo(3);
+    }
+    
+    @Test
+    @DisplayName("Should handle data clearing correctly")
+    void shouldHandleDataClearingCorrectly() throws Exception {
+        // Phase 1: Record commands to build patterns
+        CompletableFuture.allOf(
+            service.recordCommandExecution("persistent command 1", testUserId, InterfaceType.CLI, true, null),
+            service.recordCommandExecution("persistent command 2", testUserId, InterfaceType.CLI, true, null),
+            service.recordCommandExecution("persistent command 3", testUserId, InterfaceType.CLI, true, null)
+        ).get(5, TimeUnit.SECONDS);
+        
+        Thread.sleep(100); // Wait for learning
+        
+        // Phase 2: Verify patterns exist (get analytics)
+        CommandAnalyticsResponse beforeClear = service.getCommandAnalytics(testUserId).get(5, TimeUnit.SECONDS);
+        assertThat(beforeClear.isSuccessful()).isTrue();
+        
+        // Phase 3: Clear user data
+        CompletableFuture<Void> clearFuture = service.clearLearningData(testUserId);
+        clearFuture.get(5, TimeUnit.SECONDS);
+        
+        // Phase 4: Verify data is cleared
+        CommandAnalyticsResponse afterClear = service.getCommandAnalytics(testUserId).get(5, TimeUnit.SECONDS);
+        assertThat(afterClear.isSuccessful()).isTrue();
+        assertThat(afterClear.getTotalPatterns()).isEqualTo(0);
+        assertThat(afterClear.getOverallSuccessRate()).isEqualTo(0.0);
+    }
+    
+    @Test
+    @DisplayName("Should provide accurate health status")
+    void shouldProvideAccurateHealthStatus() {
+        // Act
+        Map<String, Object> health = service.getHealthStatus();
+        
+        // Assert
+        assertThat(health).isNotNull();
+        assertThat(health.get("service")).isEqualTo("ContextualCommandPaletteService");
+        assertThat(health.get("status")).isEqualTo("healthy");
+        assertThat(health.get("learningEngineEnabled")).isEqualTo(true);
+        assertThat(health.get("learningEngineVersion")).isNotNull();
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> metrics = (Map<String, Object>) health.get("metrics");
+        assertThat(metrics).isNotNull();
+        assertThat(metrics).containsKeys("totalRequests", "successfulRequests", "failedRequests", 
+                                        "successRate", "requestsByInterface", "cacheSize");
+        
+        assertThat(health.get("configuration")).isEqualTo(properties);
+        assertThat(health.get("timestamp")).isNotNull();
+    }
+    
+    @Test
+    @DisplayName("Should handle concurrent suggestion requests correctly")
+    void shouldHandleConcurrentSuggestionRequestsCorrectly() throws Exception {
+        // Phase 1: Record base patterns
+        service.recordCommandExecution("concurrent test", testUserId, InterfaceType.CLI, true, null)
+                .get(5, TimeUnit.SECONDS);
+        
+        Thread.sleep(100);
+        
+        // Phase 2: Send multiple concurrent requests
+        CommandSuggestionRequest request1 = new CommandSuggestionRequest("concurrent", testUserId, InterfaceType.CLI);
+        CommandSuggestionRequest request2 = new CommandSuggestionRequest("concurrent", testUserId, InterfaceType.CLI);
+        CommandSuggestionRequest request3 = new CommandSuggestionRequest("concurrent", testUserId, InterfaceType.CLI);
+        
+        // Send requests concurrently
+        CompletableFuture<CommandSuggestionResponse> future1 = service.getSuggestions(request1);
+        CompletableFuture<CommandSuggestionResponse> future2 = service.getSuggestions(request2);
+        CompletableFuture<CommandSuggestionResponse> future3 = service.getSuggestions(request3);
+        
+        // Wait for all to complete
+        CompletableFuture.allOf(future1, future2, future3).get(10, TimeUnit.SECONDS);
+        
+        // Assert all responses are successful
+        CommandSuggestionResponse response1 = future1.get();
+        CommandSuggestionResponse response2 = future2.get();
+        CommandSuggestionResponse response3 = future3.get();
+        
+        assertThat(response1.isSuccessful()).isTrue();
+        assertThat(response2.isSuccessful()).isTrue();
+        assertThat(response3.isSuccessful()).isTrue();
+        
+        // All should have the same user ID and partial input
+        assertThat(response1.getUserId()).isEqualTo(testUserId);
+        assertThat(response2.getUserId()).isEqualTo(testUserId);
+        assertThat(response3.getUserId()).isEqualTo(testUserId);
+        
+        assertThat(response1.getPartialInput()).isEqualTo("concurrent");
+        assertThat(response2.getPartialInput()).isEqualTo("concurrent");
+        assertThat(response3.getPartialInput()).isEqualTo("concurrent");
+    }
+    
+    @Test
+    @DisplayName("Should demonstrate cross-interface learning")
+    void shouldDemonstrateCrossInterfaceLearning() throws Exception {
+        // Phase 1: Record command in CLI interface
+        service.recordCommandExecution("cross-interface command", testUserId, InterfaceType.CLI, true, 
+                Map.of("source", "cli")).get(5, TimeUnit.SECONDS);
+        
+        Thread.sleep(100);
+        
+        // Phase 2: Request suggestions from WEB interface
+        CommandSuggestionRequest webRequest = new CommandSuggestionRequest(
+            "cross", testUserId, InterfaceType.WEB
+        );
+        
+        CompletableFuture<CommandSuggestionResponse> responseFuture = service.getSuggestions(webRequest);
+        CommandSuggestionResponse response = responseFuture.get(5, TimeUnit.SECONDS);
+        
+        // Assert
+        assertThat(response).isNotNull();
+        assertThat(response.isSuccessful()).isTrue();
+        assertThat(response.getInterfaceType()).isEqualTo(InterfaceType.WEB_UI);
+        assertThat(response.isCrossInterfaceUsed()).isTrue();
+        
+        // Should be able to suggest commands learned from different interface
+        // (Actual behavior depends on learning algorithm and pattern matching)
+        assertThat(response.getTotalSuggestions()).isGreaterThanOrEqualTo(0);
+    }
+    
+    @Test
+    @DisplayName("Should maintain performance under load")
+    void shouldMaintainPerformanceUnderLoad() throws Exception {
+        // Phase 1: Record base patterns
+        for (int i = 0; i < 10; i++) {
+            service.recordCommandExecution("load test " + i, testUserId, InterfaceType.CLI, true, null);
+        }
+        
+        // Wait for learning
+        Thread.sleep(200);
+        
+        // Phase 2: Send many requests quickly
+        int numRequests = 20;
+        CompletableFuture<CommandSuggestionResponse>[] futures = new CompletableFuture[numRequests];
+        
+        long startTime = System.currentTimeMillis();
+        
+        for (int i = 0; i < numRequests; i++) {
+            CommandSuggestionRequest request = new CommandSuggestionRequest(
+                "load", testUserId + "_" + i, InterfaceType.CLI // Different users to avoid rate limiting
+            );
+            futures[i] = service.getSuggestions(request);
+        }
+        
+        // Wait for all to complete
+        CompletableFuture.allOf(futures).get(30, TimeUnit.SECONDS);
+        
+        long endTime = System.currentTimeMillis();
+        long totalTime = endTime - startTime;
+        
+        // Assert performance
+        assertThat(totalTime).isLessThan(10000); // Should complete within 10 seconds
+        
+        // Verify all responses are valid
+        for (CompletableFuture<CommandSuggestionResponse> future : futures) {
+            CommandSuggestionResponse response = future.get();
+            assertThat(response).isNotNull();
+            // Don't require success since some might be rate limited or have no patterns
+        }
+        
+        // Check health status shows requests were processed
+        Map<String, Object> health = service.getHealthStatus();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> metrics = (Map<String, Object>) health.get("metrics");
+        
+        long totalRequests = (Long) metrics.get("totalRequests");
+        assertThat(totalRequests).isGreaterThanOrEqualTo(numRequests);
+    }
+}

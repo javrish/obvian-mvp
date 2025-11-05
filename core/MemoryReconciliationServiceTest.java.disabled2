@@ -1,0 +1,646 @@
+package tests.core;
+
+import core.MemoryReconciliationService;
+import core.MemoryReconciliationService.*;
+import memory.MemoryStoreInterface;
+import memory.ExecutionMemoryEntry;
+import memory.FileMemoryEntry;
+import core.DAG;
+import core.DagExecutionResult;
+import core.explainability.ExecutionTrace;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * Comprehensive test suite for MemoryReconciliationService
+ * Tests cross-agent memory synchronization, conflict resolution, and privacy boundaries
+ */
+@ExtendWith(MockitoExtension.class)
+public class MemoryReconciliationServiceTest {
+    
+    private MemoryReconciliationService reconciliationService;
+    
+    @Mock(lenient = true)
+    private MemoryStoreInterface agent1Memory;
+    
+    @Mock(lenient = true)
+    private MemoryStoreInterface agent2Memory;
+    
+    @Mock(lenient = true)
+    private MemoryStoreInterface agent3Memory;
+    
+    private Map<String, MemoryStoreInterface> agentMemoryStores;
+    
+    @BeforeEach
+    void setUp() {
+        reconciliationService = new MemoryReconciliationService();
+        
+        // Setup mock behavior for getUserContext() method calls
+        lenient().when(agent1Memory.getUserContext()).thenReturn(mock(memory.UserContextMemory.class));
+        lenient().when(agent2Memory.getUserContext()).thenReturn(mock(memory.UserContextMemory.class));
+        lenient().when(agent3Memory.getUserContext()).thenReturn(mock(memory.UserContextMemory.class));
+        
+        // Setup default mock behavior for getExecutions() and getFiles() methods
+        lenient().when(agent1Memory.getExecutions()).thenReturn(new HashMap<>());
+        lenient().when(agent2Memory.getExecutions()).thenReturn(new HashMap<>());
+        lenient().when(agent3Memory.getExecutions()).thenReturn(new HashMap<>());
+        lenient().when(agent1Memory.getFiles()).thenReturn(new HashMap<>());
+        lenient().when(agent2Memory.getFiles()).thenReturn(new HashMap<>());
+        lenient().when(agent3Memory.getFiles()).thenReturn(new HashMap<>());
+        
+        agentMemoryStores = new HashMap<>();
+        agentMemoryStores.put("agent1", agent1Memory);
+        agentMemoryStores.put("agent2", agent2Memory);
+        agentMemoryStores.put("agent3", agent3Memory);
+    }
+    
+    @AfterEach
+    void tearDown() {
+        if (reconciliationService != null) {
+            reconciliationService.shutdown();
+        }
+    }
+    
+    @Nested
+    @DisplayName("Memory Policy Management Tests")
+    class MemoryPolicyTests {
+        
+        @Test
+        @DisplayName("Should set and retrieve memory sharing policy")
+        void testSetAndGetMemoryPolicy() {
+            // Arrange
+            String agentId = "agent1";
+            MemorySharePolicy policy = new MemorySharePolicy(
+                agentId,
+                EnumSet.of(ShareScope.EXECUTION_RESULTS, ShareScope.FILE_MEMORY),
+                Set.of("user1", "user2"),
+                Set.of("assistant", "analyzer"),
+                true,
+                100,
+                Set.of("sensitive-key")
+            );
+            
+            // Act
+            reconciliationService.setAgentPolicy(agentId, policy);
+            MemorySharePolicy retrievedPolicy = reconciliationService.getAgentPolicy(agentId);
+            
+            // Assert
+            assertNotNull(retrievedPolicy);
+            assertEquals(agentId, retrievedPolicy.getAgentId());
+            assertEquals(2, retrievedPolicy.getAllowedScopes().size());
+            assertTrue(retrievedPolicy.getAllowedScopes().contains(ShareScope.EXECUTION_RESULTS));
+            assertTrue(retrievedPolicy.getAllowedScopes().contains(ShareScope.FILE_MEMORY));
+            assertEquals(2, retrievedPolicy.getSharedUsers().size());
+            assertTrue(retrievedPolicy.getSharedUsers().contains("user1"));
+            assertTrue(retrievedPolicy.isRequiresApproval());
+            assertEquals(100, retrievedPolicy.getMaxSharedEntries());
+            assertTrue(retrievedPolicy.getExcludedKeys().contains("sensitive-key"));
+        }
+        
+        @Test
+        @DisplayName("Should return null for non-existent policy")
+        void testGetNonExistentPolicy() {
+            // Act & Assert
+            assertNull(reconciliationService.getAgentPolicy("nonexistent-agent"));
+        }
+    }
+    
+    @Nested
+    @DisplayName("Memory Reconciliation Tests")
+    class ReconciliationTests {
+        
+        @Test
+        @DisplayName("Should reconcile execution results between agents")
+        void testReconcileExecutionResults() throws Exception {
+            // Arrange
+            setupTestExecutionData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            assertNotNull(result);
+            assertTrue(result.isSuccessful());
+            assertEquals("agent1", result.getRequestingAgentId());
+            assertTrue(result.getTargetAgentIds().contains("agent2"));
+            assertTrue(result.getScopes().contains(ShareScope.EXECUTION_RESULTS));
+            assertTrue(result.getEntriesReconciled() > 0);
+        }
+        
+        @Test
+        @DisplayName("Should reconcile file memory between agents")
+        void testReconcileFileMemory() throws Exception {
+            // Arrange
+            setupTestFileData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.FILE_MEMORY),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            assertNotNull(result);
+            assertTrue(result.isSuccessful());
+            assertTrue(result.getEntriesReconciled() > 0);
+            assertEquals(0, result.getConflictsResolved()); // No conflicts in this test
+        }
+        
+        @Test
+        @DisplayName("Should detect and resolve conflicts with latest timestamp strategy")
+        void testConflictResolutionLatestTimestamp() throws Exception {
+            // Arrange
+            setupConflictingData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.FILE_MEMORY),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            assertNotNull(result);
+            assertTrue(result.getConflicts().size() > 0);
+            
+            // Verify conflict resolution
+            MemoryConflict conflict = result.getConflicts().get(0);
+            assertEquals(ConflictResolutionStrategy.TIMESTAMP_LATEST, conflict.getStrategy());
+            assertTrue(conflict.isResolved());
+        }
+        
+        @Test
+        @DisplayName("Should respect privacy boundaries and excluded keys")
+        void testPrivacyBoundaries() throws Exception {
+            // Arrange
+            setupTestExecutionData();
+            setupRestrictivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS, ShareScope.FILE_MEMORY),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            assertNotNull(result);
+            // Should have limited reconciliation due to restrictive policies
+            assertTrue(result.getEntriesReconciled() < 3); // Less than unrestricted case
+        }
+        
+        @Test
+        @DisplayName("Should handle multiple target agents")
+        void testMultipleTargetAgents() throws Exception {
+            // Arrange
+            setupTestExecutionData();
+            setupMultiAgentData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2", "agent3"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            assertNotNull(result);
+            assertEquals(2, result.getTargetAgentIds().size());
+            assertTrue(result.getTargetAgentIds().contains("agent2"));
+            assertTrue(result.getTargetAgentIds().contains("agent3"));
+            assertTrue(result.getEntriesReconciled() > 0);
+        }
+        
+        @Test
+        @DisplayName("Should fail when requesting agent not in memory stores")
+        void testMissingRequestingAgent() {
+            // Act & Assert
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "nonexistent-agent", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            assertThrows(Exception.class, () -> future.get(5, TimeUnit.SECONDS));
+        }
+    }
+    
+    @Nested
+    @DisplayName("Conflict Resolution Tests")
+    class ConflictResolutionTests {
+        
+        @Test
+        @DisplayName("Should resolve conflicts using timestamp-latest strategy")
+        void testTimestampLatestStrategy() throws Exception {
+            // Arrange
+            setupConflictingData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.FILE_MEMORY),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            assertTrue(result.getConflicts().size() > 0);
+            MemoryConflict conflict = result.getConflicts().get(0);
+            assertTrue(conflict.isResolved());
+            
+            // The resolved value should be the newer one from agent2
+            FileMemoryEntry resolvedEntry = (FileMemoryEntry) conflict.getResolvedValue();
+            assertEquals("agent2 content", resolvedEntry.getContent());
+        }
+        
+        @Test
+        @DisplayName("Should handle manual approval strategy")
+        void testManualApprovalStrategy() throws Exception {
+            // Arrange
+            setupConflictingUserContextData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.USER_CONTEXT),
+                agentMemoryStores
+            );
+            
+            ReconciliationResult result = future.get(5, TimeUnit.SECONDS);
+            
+            // Assert
+            // User context conflicts should use manual approval strategy
+            assertTrue(result.getConflicts().size() > 0);
+            MemoryConflict conflict = result.getConflicts().get(0);
+            assertEquals(ConflictResolutionStrategy.MANUAL_APPROVAL, conflict.getStrategy());
+            assertFalse(conflict.isResolved()); // Should not be auto-resolved
+        }
+    }
+    
+    @Nested
+    @DisplayName("Pending Reconciliation Tests")
+    class PendingReconciliationTests {
+        
+        @Test
+        @DisplayName("Should track pending reconciliation requests")
+        void testPendingReconciliationTracking() {
+            // Arrange
+            setupApprovalRequiredPolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            List<PendingReconciliation> pending = reconciliationService.getPendingReconciliations();
+            
+            // Assert
+            assertFalse(pending.isEmpty());
+            PendingReconciliation pendingRequest = pending.get(0);
+            assertEquals("agent1", pendingRequest.getRequestingAgentId());
+            assertTrue(pendingRequest.getTargetAgentIds().contains("agent2"));
+        }
+        
+        @Test
+        @DisplayName("Should handle reconciliation approval")
+        void testReconciliationApproval() {
+            // Arrange
+            setupApprovalRequiredPolicies();
+            
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            List<PendingReconciliation> pending = reconciliationService.getPendingReconciliations();
+            String reconciliationId = pending.get(0).getReconciliationId();
+            
+            // Act
+            boolean approved = reconciliationService.approvePendingReconciliation(reconciliationId, "agent2", true);
+            
+            // Assert
+            assertTrue(approved);
+            
+            // Check if the reconciliation is now fully approved
+            List<PendingReconciliation> updatedPending = reconciliationService.getPendingReconciliations();
+            PendingReconciliation updatedRequest = updatedPending.stream()
+                .filter(p -> p.getReconciliationId().equals(reconciliationId))
+                .findFirst()
+                .orElse(null);
+            
+            assertNotNull(updatedRequest);
+            assertTrue(updatedRequest.getApprovals().get("agent2"));
+        }
+    }
+    
+    @Nested
+    @DisplayName("History and Metrics Tests")
+    class HistoryAndMetricsTests {
+        
+        @Test
+        @DisplayName("Should record reconciliation history")
+        void testReconciliationHistory() throws Exception {
+            // Arrange
+            setupTestExecutionData();
+            setupPermissivePolicies();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            future.get(5, TimeUnit.SECONDS);
+            
+            List<ReconciliationHistory> history = reconciliationService.getReconciliationHistory("agent1");
+            
+            // Assert
+            assertFalse(history.isEmpty());
+            ReconciliationHistory entry = history.get(0);
+            assertEquals("agent1", entry.getAgentId());
+            assertTrue(entry.getReconciledScopes().contains(ShareScope.EXECUTION_RESULTS));
+            assertTrue(entry.getEntriesReconciled() > 0);
+        }
+        
+        @Test
+        @DisplayName("Should track reconciliation metrics")
+        void testReconciliationMetrics() throws Exception {
+            // Arrange
+            setupTestExecutionData();
+            setupPermissivePolicies();
+            
+            ReconciliationMetrics metricsBefore = reconciliationService.getMetrics();
+            Map<String, Object> snapshotBefore = metricsBefore.getMetricsSnapshot();
+            
+            // Act
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            future.get(5, TimeUnit.SECONDS);
+            
+            ReconciliationMetrics metricsAfter = reconciliationService.getMetrics();
+            Map<String, Object> snapshotAfter = metricsAfter.getMetricsSnapshot();
+            
+            // Assert
+            int totalBefore = (Integer) snapshotBefore.get("totalReconciliations");
+            int totalAfter = (Integer) snapshotAfter.get("totalReconciliations");
+            assertEquals(totalBefore + 1, totalAfter);
+        }
+        
+        @Test
+        @DisplayName("Should cleanup old reconciliation history")
+        void testHistoryCleanup() throws Exception {
+            // Arrange
+            setupTestExecutionData();
+            setupPermissivePolicies();
+            
+            // Create multiple reconciliation entries
+            for (int i = 0; i < 5; i++) {
+                CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                    "agent1", 
+                    Set.of("agent2"), 
+                    Set.of(ShareScope.EXECUTION_RESULTS),
+                    agentMemoryStores
+                );
+                future.get(5, TimeUnit.SECONDS);
+            }
+            
+            List<ReconciliationHistory> historyBefore = reconciliationService.getReconciliationHistory("agent1");
+            assertTrue(historyBefore.size() >= 5);
+            
+            // Act
+            reconciliationService.cleanupHistory(2, 30); // Keep only 2 entries, 30 days old
+            
+            List<ReconciliationHistory> historyAfter = reconciliationService.getReconciliationHistory("agent1");
+            
+            // Assert
+            assertTrue(historyAfter.size() <= 2);
+        }
+    }
+    
+    @Nested
+    @DisplayName("Error Handling Tests")
+    class ErrorHandlingTests {
+        
+        @Test
+        @DisplayName("Should handle empty target agent list")
+        void testEmptyTargetAgents() {
+            // Act & Assert
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Collections.emptySet(), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                agentMemoryStores
+            );
+            
+            assertThrows(Exception.class, () -> future.get(5, TimeUnit.SECONDS));
+        }
+        
+        @Test
+        @DisplayName("Should handle empty scopes")
+        void testEmptyScopes() {
+            // Act & Assert
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Collections.emptySet(),
+                agentMemoryStores
+            );
+            
+            assertThrows(Exception.class, () -> future.get(5, TimeUnit.SECONDS));
+        }
+        
+        @Test
+        @DisplayName("Should handle null memory stores gracefully")
+        void testNullMemoryStores() {
+            // Act & Assert
+            CompletableFuture<ReconciliationResult> future = reconciliationService.requestReconciliation(
+                "agent1", 
+                Set.of("agent2"), 
+                Set.of(ShareScope.EXECUTION_RESULTS),
+                null
+            );
+            
+            assertThrows(Exception.class, () -> future.get(5, TimeUnit.SECONDS));
+        }
+    }
+    
+    // Helper methods for setting up test data
+    
+    private void setupTestExecutionData() {
+        // Mock execution data that agent2 has but agent1 doesn't have
+        Map<String, ExecutionMemoryEntry> agent2ExecutionsMap = new HashMap<>();
+        agent2ExecutionsMap.put("exec1", mock(ExecutionMemoryEntry.class));
+        agent2ExecutionsMap.put("exec2", mock(ExecutionMemoryEntry.class));
+        
+        when(agent2Memory.getExecutions()).thenReturn(agent2ExecutionsMap);
+        when(agent1Memory.getExecutions()).thenReturn(new HashMap<>());
+    }
+    
+    private void setupTestFileData() {
+        // Mock file data that agent2 has but agent1 doesn't have
+        Map<String, FileMemoryEntry> agent2FilesMap = new HashMap<>();
+        agent2FilesMap.put("file1.txt", mock(FileMemoryEntry.class));
+        agent2FilesMap.put("file2.txt", mock(FileMemoryEntry.class));
+        
+        when(agent2Memory.getFiles()).thenReturn(agent2FilesMap);
+        when(agent1Memory.getFiles()).thenReturn(new HashMap<>());
+    }
+    
+    private void setupConflictingData() {
+        // Mock conflicting file entries with different timestamps
+        FileMemoryEntry agent1File = mock(FileMemoryEntry.class);
+        FileMemoryEntry agent2File = mock(FileMemoryEntry.class);
+        
+        when(agent1File.getFilename()).thenReturn("conflict.txt");
+        when(agent1File.getContent()).thenReturn("agent1 content");
+        when(agent1File.getTimestamp()).thenReturn(LocalDateTime.now().minusMinutes(10));
+        
+        when(agent2File.getFilename()).thenReturn("conflict.txt");
+        when(agent2File.getContent()).thenReturn("agent2 content");
+        when(agent2File.getTimestamp()).thenReturn(LocalDateTime.now());
+        
+        Map<String, FileMemoryEntry> agent1FilesMap = new HashMap<>();
+        agent1FilesMap.put("conflict.txt", agent1File);
+        Map<String, FileMemoryEntry> agent2FilesMap = new HashMap<>();
+        agent2FilesMap.put("conflict.txt", agent2File);
+        
+        when(agent1Memory.getFiles()).thenReturn(agent1FilesMap);
+        when(agent2Memory.getFiles()).thenReturn(agent2FilesMap);
+    }
+    
+    private void setupConflictingUserContextData() {
+        // Mock conflicting user context preferences
+        memory.UserContextMemory context1 = mock(memory.UserContextMemory.class);
+        memory.UserContextMemory context2 = mock(memory.UserContextMemory.class);
+        
+        when(context1.getPreference("theme")).thenReturn("dark");
+        when(context2.getPreference("theme")).thenReturn("light");
+        
+        when(agent1Memory.getUserContext()).thenReturn(context1);
+        when(agent2Memory.getUserContext()).thenReturn(context2);
+    }
+    
+    private void setupMultiAgentData() {
+        // Mock different data for agent3
+        ExecutionMemoryEntry agent3Execution = mock(ExecutionMemoryEntry.class);
+        FileMemoryEntry agent3File = mock(FileMemoryEntry.class);
+        
+        when(agent3File.getFilename()).thenReturn("agent3-file.txt");
+        when(agent3File.getContent()).thenReturn("agent3 content");
+        
+        Map<String, ExecutionMemoryEntry> agent3ExecutionsMap = new HashMap<>();
+        agent3ExecutionsMap.put("agent3-exec", agent3Execution);
+        Map<String, FileMemoryEntry> agent3FilesMap = new HashMap<>();
+        agent3FilesMap.put("agent3-file.txt", agent3File);
+        
+        when(agent3Memory.getExecutions()).thenReturn(agent3ExecutionsMap);
+        when(agent3Memory.getFiles()).thenReturn(agent3FilesMap);
+    }
+    
+    private void setupPermissivePolicies() {
+        // Set up policies that allow all sharing
+        Set<ShareScope> allScopes = EnumSet.allOf(ShareScope.class);
+        
+        MemorySharePolicy permissivePolicy1 = new MemorySharePolicy(
+            "agent1", allScopes, Set.of("user1", "user2"), Set.of("assistant", "analyzer"), false, 1000, Set.of()
+        );
+        
+        MemorySharePolicy permissivePolicy2 = new MemorySharePolicy(
+            "agent2", allScopes, Set.of("user1", "user2"), Set.of("assistant", "analyzer"), false, 1000, Set.of()
+        );
+        
+        MemorySharePolicy permissivePolicy3 = new MemorySharePolicy(
+            "agent3", allScopes, Set.of("user1", "user2"), Set.of("assistant", "analyzer"), false, 1000, Set.of()
+        );
+        
+        reconciliationService.setAgentPolicy("agent1", permissivePolicy1);
+        reconciliationService.setAgentPolicy("agent2", permissivePolicy2);
+        reconciliationService.setAgentPolicy("agent3", permissivePolicy3);
+    }
+    
+    private void setupRestrictivePolicies() {
+        // Set up policies with restrictions
+        MemorySharePolicy restrictivePolicy1 = new MemorySharePolicy(
+            "agent1", Set.of(ShareScope.EXECUTION_RESULTS), Set.of("user1"), Set.of(), false, 10, Set.of("sensitive")
+        );
+        
+        MemorySharePolicy restrictivePolicy2 = new MemorySharePolicy(
+            "agent2", Set.of(ShareScope.FILE_MEMORY), Set.of("user1"), Set.of(), false, 10, Set.of("private")
+        );
+        
+        reconciliationService.setAgentPolicy("agent1", restrictivePolicy1);
+        reconciliationService.setAgentPolicy("agent2", restrictivePolicy2);
+    }
+    
+    private void setupApprovalRequiredPolicies() {
+        // Set up policies that require approval
+        Set<ShareScope> allScopes = EnumSet.allOf(ShareScope.class);
+        
+        MemorySharePolicy approvalPolicy1 = new MemorySharePolicy(
+            "agent1", allScopes, Set.of("user1", "user2"), Set.of("assistant"), false, 1000, Set.of()
+        );
+        
+        MemorySharePolicy approvalPolicy2 = new MemorySharePolicy(
+            "agent2", allScopes, Set.of("user1", "user2"), Set.of("assistant"), true, 1000, Set.of() // Requires approval
+        );
+        
+        reconciliationService.setAgentPolicy("agent1", approvalPolicy1);
+        reconciliationService.setAgentPolicy("agent2", approvalPolicy2);
+    }
+}

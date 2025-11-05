@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plugin API Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+        .status {
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .plugin-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .plugin-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .plugin-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+        }
+        .plugin-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 1.2em;
+        }
+        .plugin-card p {
+            margin: 5px 0;
+            opacity: 0.95;
+            font-size: 0.9em;
+        }
+        .plugin-card .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.3);
+            font-size: 0.8em;
+            margin-top: 10px;
+        }
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #764ba2;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        pre {
+            background: #f4f4f4;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-x: auto;
+            font-size: 14px;
+        }
+        .endpoint-test {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+        .endpoint-test h3 {
+            margin-top: 0;
+            color: #555;
+        }
+        .color-box {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            margin-right: 10px;
+            vertical-align: middle;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 Plugin API Test Dashboard</h1>
+        
+        <div id="status" class="status info">
+            Checking backend connection...
+        </div>
+
+        <div class="endpoint-test">
+            <h3>Backend Endpoints</h3>
+            <button onclick="testEndpoint('/api/plugins')">Test /api/plugins</button>
+            <button onclick="testEndpoint('/api/v1/plugins')">Test /api/v1/plugins</button>
+            <button onclick="testEndpoint('/')">Test Root</button>
+            <button onclick="testAllEndpoints()">Test All</button>
+        </div>
+
+        <div id="results"></div>
+        
+        <div id="plugin-display" style="display: none;">
+            <h2>Available Plugins</h2>
+            <div id="plugin-grid" class="plugin-grid"></div>
+        </div>
+
+        <div id="raw-response" style="margin-top: 30px;">
+            <h3>Raw API Response</h3>
+            <pre id="json-output">No data yet</pre>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080';
+        
+        async function testEndpoint(endpoint) {
+            const statusDiv = document.getElementById('status');
+            const resultsDiv = document.getElementById('results');
+            const jsonOutput = document.getElementById('json-output');
+            
+            statusDiv.className = 'status info';
+            statusDiv.innerHTML = `Testing ${endpoint}...`;
+            
+            try {
+                const response = await fetch(API_BASE + endpoint, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    mode: 'cors'
+                });
+                
+                const data = await response.json();
+                
+                statusDiv.className = 'status success';
+                statusDiv.innerHTML = `✅ Successfully connected to ${endpoint}`;
+                
+                jsonOutput.textContent = JSON.stringify(data, null, 2);
+                
+                // If it's a plugins endpoint, display the plugins
+                if (endpoint.includes('plugins') && data.plugins) {
+                    displayPlugins(data.plugins);
+                }
+                
+                return data;
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.innerHTML = `❌ Failed to connect to ${endpoint}: ${error.message}`;
+                jsonOutput.textContent = error.toString();
+                throw error;
+            }
+        }
+        
+        function displayPlugins(plugins) {
+            const pluginDisplay = document.getElementById('plugin-display');
+            const pluginGrid = document.getElementById('plugin-grid');
+            
+            pluginDisplay.style.display = 'block';
+            
+            if (plugins.length === 0) {
+                pluginGrid.innerHTML = '<div class="loading">No plugins found</div>';
+                return;
+            }
+            
+            pluginGrid.innerHTML = plugins.map(plugin => {
+                const colors = {
+                    'google': 'linear-gradient(135deg, #4285F4, #EA4335)',
+                    'slack': 'linear-gradient(135deg, #4A154B, #E01E5A)',
+                    'github': 'linear-gradient(135deg, #24292E, #586069)',
+                    'stripe': 'linear-gradient(135deg, #635BFF, #8A3CFF)',
+                    'email': 'linear-gradient(135deg, #0078D4, #40E0D0)',
+                    'file': 'linear-gradient(135deg, #34A853, #188038)'
+                };
+                
+                const bgStyle = colors[plugin.id] || 'linear-gradient(135deg, #667eea, #764ba2)';
+                
+                return `
+                    <div class="plugin-card" style="background: ${bgStyle};">
+                        <h3>${plugin.name || plugin.id}</h3>
+                        <p><strong>ID:</strong> ${plugin.id}</p>
+                        <p><strong>Category:</strong> ${plugin.category || 'general'}</p>
+                        ${plugin.description ? `<p>${plugin.description}</p>` : ''}
+                        <div class="status-badge">
+                            ${plugin.configured ? '✅ Configured' : '⚪ Not configured'}
+                        </div>
+                        ${plugin.connected ? '<div class="status-badge">🔗 Connected</div>' : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('status').innerHTML += `<br>Found ${plugins.length} plugins: ${plugins.map(p => p.name || p.id).join(', ')}`;
+        }
+        
+        async function testAllEndpoints() {
+            const endpoints = ['/api/plugins', '/api/v1/plugins', '/'];
+            for (const endpoint of endpoints) {
+                try {
+                    await testEndpoint(endpoint);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (error) {
+                    console.error(`Failed to test ${endpoint}:`, error);
+                }
+            }
+        }
+        
+        // Auto-test on load
+        window.onload = () => {
+            testEndpoint('/api/plugins');
+        };
+    </script>
+</body>
+</html>

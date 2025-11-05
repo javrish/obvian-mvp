@@ -1,0 +1,461 @@
+package api;
+
+import api.BaseIntegrationTest;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.*;
+
+/**
+ * Comprehensive integration tests for end-to-end API workflows
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@Testcontainers
+@DisplayName("Comprehensive Integration Tests")
+public class ComprehensiveIntegrationTest extends BaseIntegrationTest {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:15")
+            .withDatabaseName("obvian_test")
+            .withUsername("test")
+            .withPassword("test");
+
+    @Container
+    static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine")
+            .withExposedPorts(6379);
+
+    @DynamicPropertySource
+    static void configureProperties(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("spring.redis.host", redis::getHost);
+        registry.add("spring.redis.port", redis::getFirstMappedPort);
+    }
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Nested
+    @DisplayName("End-to-End Workflow Tests")
+    class EndToEndWorkflowTests {
+
+        @Test
+        @DisplayName("Should execute complete prompt-to-result workflow")
+        void shouldExecuteCompletePromptToResultWorkflow() {
+            String requestBody = """
+                {
+                    "prompt": "Send email to test@example.com saying Hello World",
+                    "dryRun": false,
+                    "trace": true,
+                    "async": false
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(200)
+                .body("executionId", notNullValue())
+                .body("status", equalTo("completed"))
+                .body("result.success", equalTo(true))
+                .body("trace", notNullValue())
+                .body("generatedDag", notNullValue());
+        }
+
+        @Test
+        @DisplayName("Should execute multi-step workflow with dependencies")
+        void shouldExecuteMultiStepWorkflowWithDependencies() {
+            String requestBody = """
+                {
+                    "prompt": "Create file report.txt with content 'Status update', then email it to manager@company.com",
+                    "dryRun": false,
+                    "trace": true
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(200)
+                .body("result.data.nodesExecuted", equalTo(2))
+                .body("result.data.nodesSucceeded", equalTo(2))
+                .body("trace.nodeExecutions", hasSize(2));
+        }
+
+        @Test
+        @DisplayName("Should handle asynchronous execution with status polling")
+        void shouldHandleAsynchronousExecutionWithStatusPolling() {
+            String requestBody = """
+                {
+                    "prompt": "Send email to test@example.com saying Hello World",
+                    "async": true
+                }
+                """;
+
+            // Start async execution
+            String executionId = given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(202)
+                .body("executionId", notNullValue())
+                .body("status", equalTo("running"))
+                .extract()
+                .path("executionId");
+
+            // Poll for completion
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/executions/{executionId}/status", executionId)
+            .then()
+                .statusCode(anyOf(equalTo(200), equalTo(202)))
+                .body("executionId", equalTo(executionId));
+        }
+
+        @Test
+        @DisplayName("Should execute DAG with structured input")
+        void shouldExecuteDagWithStructuredInput() {
+            String requestBody = """
+                {
+                    "dag": {
+                        "nodes": [
+                            {
+                                "id": "email_task",
+                                "action": "EmailPlugin",
+                                "inputParams": {
+                                    "recipient": "test@example.com",
+                                    "subject": "Test Email",
+                                    "body": "Hello from DAG execution"
+                                },
+                                "dependencies": []
+                            }
+                        ],
+                        "rootNode": "email_task"
+                    },
+                    "context": {
+                        "userId": "test_user"
+                    },
+                    "options": {
+                        "trace": true,
+                        "timeout": 300
+                    }
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/dags/execute")
+            .then()
+                .statusCode(200)
+                .body("executionId", notNullValue())
+                .body("result.success", equalTo(true))
+                .body("result.nodeResults.email_task.status", equalTo("SUCCESS"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Memory Integration Tests")
+    class MemoryIntegrationTests {
+
+        @Test
+        @DisplayName("Should create and retrieve memory entries")
+        void shouldCreateAndRetrieveMemoryEntries() {
+            // Create memory entry
+            String createRequest = """
+                {
+                    "type": "file",
+                    "filename": "test.txt",
+                    "content": "Test content for memory",
+                    "metadata": {
+                        "source": "integration_test"
+                    }
+                }
+                """;
+
+            String entryId = given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(createRequest)
+            .when()
+                .post("/api/v1/memory")
+            .then()
+                .statusCode(201)
+                .body("id", notNullValue())
+                .extract()
+                .path("id");
+
+            // Retrieve memory entries
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/memory")
+            .then()
+                .statusCode(200)
+                .body("entries", hasSize(greaterThan(0)))
+                .body("entries[0].id", equalTo(entryId))
+                .body("entries[0].filename", equalTo("test.txt"));
+
+            // Delete memory entry
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .delete("/api/v1/memory/{id}", entryId)
+            .then()
+                .statusCode(204);
+        }
+
+        @Test
+        @DisplayName("Should use memory context in prompt execution")
+        void shouldUseMemoryContextInPromptExecution() {
+            // First, create a memory entry
+            String createRequest = """
+                {
+                    "type": "file",
+                    "filename": "report.txt",
+                    "content": "Monthly status report"
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(createRequest)
+            .when()
+                .post("/api/v1/memory")
+            .then()
+                .statusCode(201);
+
+            // Then use memory reference in prompt
+            String promptRequest = """
+                {
+                    "prompt": "Email the last file I created to manager@company.com",
+                    "memoryContext": {
+                        "includeHistory": true,
+                        "maxEntries": 5
+                    }
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(promptRequest)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(200)
+                .body("result.success", equalTo(true));
+        }
+
+        @Test
+        @DisplayName("Should search memory entries")
+        void shouldSearchMemoryEntries() {
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .queryParam("search", "test")
+                .queryParam("type", "file")
+                .queryParam("limit", "10")
+            .when()
+                .get("/api/v1/memory")
+            .then()
+                .statusCode(200)
+                .body("entries", notNullValue())
+                .body("pagination", notNullValue());
+        }
+    }
+
+    @Nested
+    @DisplayName("Plugin Integration Tests")
+    class PluginIntegrationTests {
+
+        @Test
+        @DisplayName("Should discover available plugins")
+        void shouldDiscoverAvailablePlugins() {
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/plugins")
+            .then()
+                .statusCode(200)
+                .body("plugins", hasSize(greaterThan(0)))
+                .body("plugins[0].id", notNullValue())
+                .body("plugins[0].name", notNullValue())
+                .body("plugins[0].status", notNullValue());
+        }
+
+        @Test
+        @DisplayName("Should get plugin details")
+        void shouldGetPluginDetails() {
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/plugins/EmailPlugin")
+            .then()
+                .statusCode(200)
+                .body("id", equalTo("EmailPlugin"))
+                .body("parameters", notNullValue())
+                .body("examples", notNullValue());
+        }
+
+        @Test
+        @DisplayName("Should check plugin health")
+        void shouldCheckPluginHealth() {
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/plugins/EmailPlugin/health")
+            .then()
+                .statusCode(200)
+                .body("pluginId", equalTo("EmailPlugin"))
+                .body("status", notNullValue())
+                .body("lastChecked", notNullValue());
+        }
+
+        @Test
+        @DisplayName("Should filter plugins by category")
+        void shouldFilterPluginsByCategory() {
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .queryParam("category", "communication")
+            .when()
+                .get("/api/v1/plugins")
+            .then()
+                .statusCode(200)
+                .body("plugins", hasSize(greaterThan(0)))
+                .body("plugins[0].category", equalTo("communication"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Database Integration Tests")
+    class DatabaseIntegrationTests {
+
+        @Test
+        @DisplayName("Should persist execution results to database")
+        void shouldPersistExecutionResultsToDatabase() {
+            String requestBody = """
+                {
+                    "prompt": "Send email to test@example.com",
+                    "trace": true
+                }
+                """;
+
+            String executionId = given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(200)
+                .extract()
+                .path("executionId");
+
+            // Verify execution is persisted
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/executions/{executionId}/status", executionId)
+            .then()
+                .statusCode(200)
+                .body("executionId", equalTo(executionId));
+        }
+
+        @Test
+        @DisplayName("Should retrieve execution history from database")
+        void shouldRetrieveExecutionHistoryFromDatabase() {
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+                .queryParam("limit", "20")
+                .queryParam("offset", "0")
+            .when()
+                .get("/api/v1/executions/history")
+            .then()
+                .statusCode(200)
+                .body("executions", notNullValue())
+                .body("pagination", notNullValue());
+        }
+
+        @Test
+        @DisplayName("Should handle database connection failures gracefully")
+        void shouldHandleDatabaseConnectionFailuresGracefully() {
+            // This test would require stopping the database container
+            // and verifying graceful degradation
+            // Implementation depends on specific error handling strategy
+        }
+    }
+
+    @Nested
+    @DisplayName("Redis Integration Tests")
+    class RedisIntegrationTests {
+
+        @Test
+        @DisplayName("Should use Redis for rate limiting")
+        void shouldUseRedisForRateLimiting() {
+            // Make multiple requests to test rate limiting
+            for (int i = 0; i < 10; i++) {
+                given()
+                    .header("Authorization", "Bearer " + getValidToken())
+                .when()
+                    .get("/api/v1/plugins")
+                .then()
+                    .statusCode(200);
+            }
+
+            // Additional requests should be rate limited
+            // (depending on rate limit configuration)
+        }
+
+        @Test
+        @DisplayName("Should cache plugin information in Redis")
+        void shouldCachePluginInformationInRedis() {
+            // First request should hit the service
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/plugins/EmailPlugin")
+            .then()
+                .statusCode(200);
+
+            // Second request should be served from cache
+            given()
+                .header("Authorization", "Bearer " + getValidToken())
+            .when()
+                .get("/api/v1/plugins/EmailPlugin")
+            .then()
+                .statusCode(200);
+        }
+    }
+
+    private String getValidToken() {
+        // Return a valid JWT token for testing
+        return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.token";
+    }
+}

@@ -1,0 +1,527 @@
+package core.petri.execution;
+
+import core.DAG;
+import core.DagExecutor;
+import core.TaskNode;
+import core.petri.*;
+import core.petri.builder.PetriNetBuilder;
+import core.petri.grammar.AutomationGrammar;
+import core.petri.projection.PetriToDagProjector;
+import core.petri.simulation.*;
+import core.petri.validation.PetriNetValidator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.util.*;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+/**
+ * P3NetExecutionService - Integrates Petri net formal verification with plugin execution
+ *
+ * This service implements the complete steel thread:
+ * 1. Natural language → PetriIntentSpec (via PromptParser or manual)
+ * 2. PetriIntentSpec → PetriNet (via AutomationGrammar + RuleEngine)
+ * 3. PetriNet → Validation (via PetriNetValidator)
+ * 4. PetriNet → Simulation (via PetriTokenSimulator - optional preview)
+ * 5. PetriNet → DAG projection (via PetriToDagProjector)
+ * 6. DAG → Plugin execution (via DagExecutor with plugin name inference)
+ * 7. Execution results → User
+ *
+ * Key innovation: Plugin name inference from natural language task descriptions
+ * using pattern matching and keyword detection, enabling seamless bridge from
+ * formal verification to actual execution.
+ *
+ * @author Obvian Labs
+ * @since Phase 2 - P3Net Integration
+ */
+@Service
+public class P3NetExecutionService {
+
+    private static final Logger logger = LoggerFactory.getLogger(P3NetExecutionService.class);
+
+    @Autowired
+    private AutomationGrammar automationGrammar;
+
+    @Autowired
+    private PetriNetValidator validator;
+
+    @Autowired
+    private PetriTokenSimulator simulator;
+
+    @Autowired
+    private PetriToDagProjector projector;
+
+    @Autowired
+    private DagExecutor dagExecutor;
+
+    private final Clock clock = Clock.systemDefaultZone();
+
+    // Plugin name inference patterns (from natural language → plugin name)
+    private static final Map<Pattern, String> PLUGIN_INFERENCE_PATTERNS = new LinkedHashMap<>();
+
+    static {
+        // Email patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(send|email|mail|notify).*(@|email)", Pattern.CASE_INSENSITIVE), "EmailPlugin");
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(email|mail).*", Pattern.CASE_INSENSITIVE), "EmailPlugin");
+
+        // File patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(create|write|save|store|generate)\\s+(file|document|report).*", Pattern.CASE_INSENSITIVE), "FilePlugin");
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(file|document|report).*", Pattern.CASE_INSENSITIVE), "FilePlugin");
+
+        // Slack patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(slack|message|chat|post).*", Pattern.CASE_INSENSITIVE), "SlackPlugin");
+
+        // Reminder patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(remind|reminder|schedule|alert).*", Pattern.CASE_INSENSITIVE), "ReminderPlugin");
+
+        // LLM/AI patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(analyze|summarize|generate|translate|extract|classify).*", Pattern.CASE_INSENSITIVE), "LLMPlugin");
+
+        // Validation patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(validate|verify|check|confirm)\\s+(input|data|format).*", Pattern.CASE_INSENSITIVE), "ValidationPlugin");
+
+        // Processing patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(process|transform|convert|parse)\\s+(data|input).*", Pattern.CASE_INSENSITIVE), "DataProcessorPlugin");
+
+        // Notification patterns
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile("(?i).*(send|trigger|fire)\\s+(notification|alert).*", Pattern.CASE_INSENSITIVE), "NotificationPlugin");
+
+        // Default fallback
+        PLUGIN_INFERENCE_PATTERNS.put(Pattern.compile(".*", Pattern.CASE_INSENSITIVE), "EchoPlugin");
+    }
+
+    /**
+     * Execute a complete P3Net workflow with formal verification and plugin execution
+     *
+     * @param intentSpec The intent specification describing the workflow
+     * @param config Execution configuration
+     * @return Complete execution result with verification and execution data
+     */
+    public P3NetExecutionResult execute(PetriIntentSpec intentSpec, P3NetExecutionConfig config) {
+        P3NetExecutionResult.Builder resultBuilder = P3NetExecutionResult.builder()
+                .startTime(clock.instant())
+                .config(config);
+
+        try {
+            // Phase 1: Build Petri net from intent
+            logger.info("Phase 1: Building Petri net from intent '{}'", intentSpec.getName());
+            PetriNetBuilder builder = new PetriNetBuilder();
+            PetriNet petriNet = builder.buildFromIntent(intentSpec);
+            resultBuilder.petriNet(petriNet);
+
+            logger.info("Built Petri net: {} places, {} transitions, {} arcs",
+                       petriNet.getPlaces().size(), petriNet.getTransitions().size(), petriNet.getArcs().size());
+
+            // Phase 2: Validate Petri net (required before execution)
+            if (config.isValidationEnabled()) {
+                logger.info("Phase 2: Validating Petri net for safety properties");
+                core.petri.validation.PetriNetValidationResult.ValidationConfig validationConfig =
+                    new core.petri.validation.PetriNetValidationResult.ValidationConfig(
+                        config.getKBound(),
+                        config.getValidationTimeoutMs(),
+                        null // All checks enabled
+                    );
+
+                core.petri.validation.PetriNetValidationResult validationResult = validator.validate(petriNet, validationConfig);
+                resultBuilder.validationResult(validationResult);
+
+                logger.info("Validation result: {} - {}",
+                           validationResult.getPetriStatus(), validationResult.getSummary());
+
+                // Abort if validation fails and strict mode is enabled
+                if (validationResult.getPetriStatus() == core.petri.validation.PetriNetValidationResult.ValidationStatus.FAIL && config.isStrictValidation()) {
+                    logger.error("Validation failed in strict mode - aborting execution");
+                    return resultBuilder
+                        .status(ExecutionStatus.VALIDATION_FAILED)
+                        .endTime(clock.instant())
+                        .build();
+                }
+            }
+
+            // Phase 3: Simulate (optional preview)
+            if (config.isSimulationEnabled()) {
+                logger.info("Phase 3: Running simulation preview");
+                SimulationConfig simConfig = SimulationConfig.builder()
+                    .mode(SimulationMode.DETERMINISTIC)
+                    .seed(config.getSimulationSeed())
+                    .maxSteps(config.getMaxSimulationSteps())
+                    .verbose(false)
+                    .build();
+
+                SimulationResult simResult = simulator.simulate(petriNet, simConfig);
+                resultBuilder.simulationResult(simResult);
+
+                logger.info("Simulation completed: {} steps, status: {}",
+                           simResult.getStepsExecuted(), simResult.getStatus());
+            }
+
+            // Phase 4: Project to DAG
+            logger.info("Phase 4: Projecting Petri net to executable DAG");
+            DAG dag = projector.projectToDAG(petriNet);
+            resultBuilder.dag(dag);
+
+            logger.info("Projected to DAG with {} nodes", dag.getNodes().size());
+
+            // Phase 5: Infer plugin names for all nodes
+            logger.info("Phase 5: Inferring plugin names from task descriptions");
+            enrichDagWithPluginNames(dag, petriNet);
+
+            // Phase 6: Execute DAG with plugins
+            if (config.isExecutionEnabled()) {
+                logger.info("Phase 6: Executing DAG with actual plugins");
+                Map<String, Object> executionResult = dagExecutor.execute(dag);
+                resultBuilder.executionResult(executionResult);
+
+                logger.info("Execution completed: {} results", executionResult.size());
+                resultBuilder.status(ExecutionStatus.SUCCESS);
+            } else {
+                logger.info("Execution skipped (dry-run mode)");
+                resultBuilder.status(ExecutionStatus.DRY_RUN);
+            }
+
+            return resultBuilder.endTime(clock.instant()).build();
+
+        } catch (Exception e) {
+            logger.error("P3Net execution failed: {}", e.getMessage(), e);
+            return resultBuilder
+                .status(ExecutionStatus.FAILED)
+                .error(e.getMessage())
+                .exception(e)
+                .endTime(clock.instant())
+                .build();
+        }
+    }
+
+    /**
+     * Enrich DAG nodes with inferred plugin names based on natural language descriptions
+     */
+    private void enrichDagWithPluginNames(DAG dag, PetriNet petriNet) {
+        for (TaskNode node : dag.getNodes()) {
+            String nodeId = node.getId();
+
+            // Find corresponding transition
+            Optional<Transition> transitionOpt = petriNet.getTransition(nodeId);
+            if (!transitionOpt.isPresent()) {
+                logger.warn("No transition found for node {}, using EchoPlugin", nodeId);
+                node.setAction("EchoPlugin");
+                continue;
+            }
+
+            Transition transition = transitionOpt.get();
+            String description = transition.getDescription();
+            if (description == null || description.trim().isEmpty()) {
+                description = transition.getName();
+            }
+
+            // Infer plugin name from description
+            String pluginName = inferPluginName(description);
+            node.setAction(pluginName);
+
+            // Build plugin parameters from transition metadata and description
+            Map<String, Object> pluginParams = buildPluginParameters(transition, description);
+            node.setInputParams(pluginParams);
+
+            logger.debug("Node {} mapped to plugin {} with params: {}",
+                        nodeId, pluginName, pluginParams);
+        }
+    }
+
+    /**
+     * Infer plugin name from natural language description using pattern matching
+     */
+    private String inferPluginName(String description) {
+        if (description == null || description.trim().isEmpty()) {
+            return "EchoPlugin";
+        }
+
+        // Try each pattern in order (more specific patterns first)
+        for (Map.Entry<Pattern, String> entry : PLUGIN_INFERENCE_PATTERNS.entrySet()) {
+            if (entry.getKey().matcher(description).matches()) {
+                logger.debug("Matched description '{}' to plugin '{}'",
+                           description, entry.getValue());
+                return entry.getValue();
+            }
+        }
+
+        return "EchoPlugin"; // Fallback
+    }
+
+    /**
+     * Build plugin parameters from transition metadata and description
+     */
+    private Map<String, Object> buildPluginParameters(Transition transition, String description) {
+        Map<String, Object> params = new HashMap<>();
+
+        // Add basic parameters
+        params.put("description", description);
+        params.put("transitionId", transition.getId());
+        params.put("transitionName", transition.getName());
+
+        // Add metadata
+        params.putAll(transition.getMetadata());
+
+        // Extract common parameters from description using simple heuristics
+        extractParametersFromDescription(description, params);
+
+        return params;
+    }
+
+    /**
+     * Extract structured parameters from natural language description
+     */
+    private void extractParametersFromDescription(String description, Map<String, Object> params) {
+        if (description == null) return;
+
+        String lower = description.toLowerCase();
+
+        // Extract email addresses
+        Pattern emailPattern = Pattern.compile("([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})");
+        java.util.regex.Matcher emailMatcher = emailPattern.matcher(description);
+        if (emailMatcher.find()) {
+            params.put("to", emailMatcher.group(1));
+        }
+
+        // Extract file names
+        Pattern filePattern = Pattern.compile("(?:file|document|report)\\s+['\"]?([a-zA-Z0-9._-]+)['\"]?", Pattern.CASE_INSENSITIVE);
+        java.util.regex.Matcher fileMatcher = filePattern.matcher(description);
+        if (fileMatcher.find()) {
+            params.put("filename", fileMatcher.group(1));
+        }
+
+        // Extract message content (text in quotes)
+        Pattern quotePattern = Pattern.compile("['\"]([^'\"]+)['\"]");
+        java.util.regex.Matcher quoteMatcher = quotePattern.matcher(description);
+        if (quoteMatcher.find()) {
+            params.put("message", quoteMatcher.group(1));
+        }
+
+        // Default message is the description itself
+        if (!params.containsKey("message")) {
+            params.put("message", description);
+        }
+    }
+
+    /**
+     * Configuration for P3Net execution
+     */
+    public static class P3NetExecutionConfig {
+        private final boolean validationEnabled;
+        private final boolean strictValidation;
+        private final int kBound;
+        private final long validationTimeoutMs;
+        private final boolean simulationEnabled;
+        private final int maxSimulationSteps;
+        private final long simulationSeed;
+        private final boolean executionEnabled;
+
+        private P3NetExecutionConfig(Builder builder) {
+            this.validationEnabled = builder.validationEnabled;
+            this.strictValidation = builder.strictValidation;
+            this.kBound = builder.kBound;
+            this.validationTimeoutMs = builder.validationTimeoutMs;
+            this.simulationEnabled = builder.simulationEnabled;
+            this.maxSimulationSteps = builder.maxSimulationSteps;
+            this.simulationSeed = builder.simulationSeed;
+            this.executionEnabled = builder.executionEnabled;
+        }
+
+        public boolean isValidationEnabled() { return validationEnabled; }
+        public boolean isStrictValidation() { return strictValidation; }
+        public int getKBound() { return kBound; }
+        public long getValidationTimeoutMs() { return validationTimeoutMs; }
+        public boolean isSimulationEnabled() { return simulationEnabled; }
+        public int getMaxSimulationSteps() { return maxSimulationSteps; }
+        public long getSimulationSeed() { return simulationSeed; }
+        public boolean isExecutionEnabled() { return executionEnabled; }
+
+        public static Builder builder() { return new Builder(); }
+
+        public static class Builder {
+            private boolean validationEnabled = true;
+            private boolean strictValidation = false;
+            private int kBound = 200;
+            private long validationTimeoutMs = 30000;
+            private boolean simulationEnabled = false;
+            private int maxSimulationSteps = 1000;
+            private long simulationSeed = 42;
+            private boolean executionEnabled = true;
+
+            public Builder validationEnabled(boolean enabled) {
+                this.validationEnabled = enabled;
+                return this;
+            }
+
+            public Builder strictValidation(boolean strict) {
+                this.strictValidation = strict;
+                return this;
+            }
+
+            public Builder kBound(int kBound) {
+                this.kBound = kBound;
+                return this;
+            }
+
+            public Builder validationTimeoutMs(long timeout) {
+                this.validationTimeoutMs = timeout;
+                return this;
+            }
+
+            public Builder simulationEnabled(boolean enabled) {
+                this.simulationEnabled = enabled;
+                return this;
+            }
+
+            public Builder maxSimulationSteps(int maxSteps) {
+                this.maxSimulationSteps = maxSteps;
+                return this;
+            }
+
+            public Builder simulationSeed(long seed) {
+                this.simulationSeed = seed;
+                return this;
+            }
+
+            public Builder executionEnabled(boolean enabled) {
+                this.executionEnabled = enabled;
+                return this;
+            }
+
+            public P3NetExecutionConfig build() {
+                return new P3NetExecutionConfig(this);
+            }
+        }
+    }
+
+    /**
+     * Execution result with complete workflow data
+     */
+    public static class P3NetExecutionResult {
+        private final Instant startTime;
+        private final Instant endTime;
+        private final ExecutionStatus status;
+        private final PetriNet petriNet;
+        private final core.petri.validation.PetriNetValidationResult validationResult;
+        private final SimulationResult simulationResult;
+        private final DAG dag;
+        private final Map<String, Object> executionResult;
+        private final String error;
+        private final Exception exception;
+        private final P3NetExecutionConfig config;
+
+        private P3NetExecutionResult(Builder builder) {
+            this.startTime = builder.startTime;
+            this.endTime = builder.endTime;
+            this.status = builder.status;
+            this.petriNet = builder.petriNet;
+            this.validationResult = builder.validationResult;
+            this.simulationResult = builder.simulationResult;
+            this.dag = builder.dag;
+            this.executionResult = builder.executionResult;
+            this.error = builder.error;
+            this.exception = builder.exception;
+            this.config = builder.config;
+        }
+
+        public Instant getStartTime() { return startTime; }
+        public Instant getEndTime() { return endTime; }
+        public ExecutionStatus getStatus() { return status; }
+        public PetriNet getPetriNet() { return petriNet; }
+        public core.petri.validation.PetriNetValidationResult getValidationResult() { return validationResult; }
+        public SimulationResult getSimulationResult() { return simulationResult; }
+        public DAG getDag() { return dag; }
+        public Map<String, Object> getExecutionResult() { return executionResult; }
+        public String getError() { return error; }
+        public Exception getException() { return exception; }
+        public P3NetExecutionConfig getConfig() { return config; }
+
+        public static Builder builder() { return new Builder(); }
+
+        public static class Builder {
+            private Instant startTime;
+            private Instant endTime;
+            private ExecutionStatus status;
+            private PetriNet petriNet;
+            private core.petri.validation.PetriNetValidationResult validationResult;
+            private SimulationResult simulationResult;
+            private DAG dag;
+            private Map<String, Object> executionResult;
+            private String error;
+            private Exception exception;
+            private P3NetExecutionConfig config;
+
+            public Builder startTime(Instant time) {
+                this.startTime = time;
+                return this;
+            }
+
+            public Builder endTime(Instant time) {
+                this.endTime = time;
+                return this;
+            }
+
+            public Builder status(ExecutionStatus status) {
+                this.status = status;
+                return this;
+            }
+
+            public Builder petriNet(PetriNet petriNet) {
+                this.petriNet = petriNet;
+                return this;
+            }
+
+            public Builder validationResult(core.petri.validation.PetriNetValidationResult result) {
+                this.validationResult = result;
+                return this;
+            }
+
+            public Builder simulationResult(SimulationResult result) {
+                this.simulationResult = result;
+                return this;
+            }
+
+            public Builder dag(DAG dag) {
+                this.dag = dag;
+                return this;
+            }
+
+            public Builder executionResult(Map<String, Object> result) {
+                this.executionResult = result;
+                return this;
+            }
+
+            public Builder error(String error) {
+                this.error = error;
+                return this;
+            }
+
+            public Builder exception(Exception exception) {
+                this.exception = exception;
+                return this;
+            }
+
+            public Builder config(P3NetExecutionConfig config) {
+                this.config = config;
+                return this;
+            }
+
+            public P3NetExecutionResult build() {
+                return new P3NetExecutionResult(this);
+            }
+        }
+    }
+
+    /**
+     * Execution status enum
+     */
+    public enum ExecutionStatus {
+        SUCCESS,
+        DRY_RUN,
+        VALIDATION_FAILED,
+        FAILED
+    }
+}

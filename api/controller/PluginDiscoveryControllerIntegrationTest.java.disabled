@@ -1,0 +1,456 @@
+package api.controller;
+
+import api.dto.RecommendationRequest;
+import api.dto.RecommendationFeedback;
+import api.dto.UserPreferenceUpdate;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureWebMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Set;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * Integration tests for PluginDiscoveryController
+ * 
+ * Tests the full integration stack including:
+ * - Real service dependencies
+ * - Database interactions
+ * - Cache integration
+ * - Security configuration
+ * - WebSocket notifications
+ * - Rate limiting
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.2a
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@AutoConfigureWebMvc
+@ActiveProfiles("integration-test")
+@TestPropertySource(properties = {
+    "spring.datasource.url=jdbc:h2:mem:testdb",
+    "spring.jpa.hibernate.ddl-auto=create-drop",
+    "obvian.plugin-discovery.rate-limiting.enabled=false",
+    "obvian.plugin-discovery.circuit-breaker.enabled=false",
+    "obvian.plugin-discovery.caching.enabled=true",
+    "obvian.plugin-discovery.async-processing.enabled=true"
+})
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Transactional
+class PluginDiscoveryControllerIntegrationTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    private static final String TEST_USER_ID = "integration-test-user";
+    private static final String BASE_URL = "/api/v1/plugin-discovery";
+
+    @Nested
+    @DisplayName("Full Integration Flow Tests")
+    class IntegrationFlowTests {
+
+        @Test
+        @Order(1)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute", "memory:read", "memory:write"})
+        @DisplayName("Should complete full recommendation workflow")
+        void fullRecommendationWorkflow() throws Exception {
+            // Step 1: Analyze a prompt
+            String prompt = "Send an email to the development team about the new release";
+            
+            String analyzeResult = mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", prompt)
+                    .param("sessionId", "integration-session-123")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.recommendations").isArray())
+                .andExpect(jsonPath("$.userId").value(TEST_USER_ID))
+                .andReturn().getResponse().getContentAsString();
+
+            // Step 2: Get detailed recommendations
+            RecommendationRequest request = RecommendationRequest.builder()
+                .maxRecommendations(5)
+                .minConfidenceThreshold(0.5)
+                .includeExplanations(true)
+                .enablePersonalization(true)
+                .build();
+
+            mockMvc.perform(post(BASE_URL + "/recommendations")
+                    .param("prompt", prompt)
+                    .content(objectMapper.writeValueAsString(request))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpected(jsonPath("$.success").value(true))
+                .andExpected(jsonPath("$.recommendations.length()").value(greaterThan(0)));
+
+            // Step 3: Record feedback
+            RecommendationFeedback feedback = RecommendationFeedback.builder()
+                .recommendationId("test-rec-123")
+                .selectedPlugin("EmailPlugin")
+                .wasSuccessful(true)
+                .userRating(4)
+                .feedbackText("Plugin worked perfectly for sending team notifications")
+                .contextAccuracy(RecommendationFeedback.ContextAccuracy.GOOD)
+                .pluginPerformance(RecommendationFeedback.PluginPerformance.FAST)
+                .build();
+
+            mockMvc.perform(post(BASE_URL + "/feedback")
+                    .content(objectMapper.writeValueAsString(feedback))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isCreated())
+                .andExpected(jsonPath("$.success").value(true));
+
+            // Step 4: Update preferences based on experience
+            UserPreferenceUpdate preferences = UserPreferenceUpdate.builder()
+                .preferredPlugins(Set.of("EmailPlugin", "SlackPlugin"))
+                .preferredCommunicationChannel("email")
+                .maxRecommendations(8)
+                .minConfidenceThreshold(0.6)
+                .enablePersonalization(true)
+                .build();
+
+            mockMvc.perform(put(BASE_URL + "/preferences")
+                    .content(objectMapper.writeValueAsString(preferences))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.success").value(true));
+
+            // Step 5: Check recommendation history
+            mockMvc.perform(get(BASE_URL + "/history")
+                    .param("timeframeDays", "1")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpected(jsonPath("$.history").isArray());
+        }
+
+        @Test
+        @Order(2)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should handle personalized recommendations after feedback")
+        void personalizedRecommendationsAfterFeedback() throws Exception {
+            // First, provide feedback to train the system
+            RecommendationFeedback positiveFeedback = RecommendationFeedback.builder()
+                .recommendationId("train-rec-1")
+                .selectedPlugin("FilePlugin")
+                .wasSuccessful(true)
+                .userRating(5)
+                .feedbackText("File plugin is excellent for document creation")
+                .build();
+
+            mockMvc.perform(post(BASE_URL + "/feedback")
+                    .content(objectMapper.writeValueAsString(positiveFeedback))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isCreated());
+
+            // Then request recommendations for a similar task
+            String prompt = "Create a project status document";
+            
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", prompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.success").value(true))
+                .andExpected(jsonPath("$.personalizedScore").exists());
+        }
+
+        @Test
+        @Order(3)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should handle batch processing efficiently")
+        void batchProcessingEfficiency() throws Exception {
+            List<String> batchPrompts = List.of(
+                "Send email to marketing team",
+                "Create quarterly report file",
+                "Schedule team meeting",
+                "Update project documentation",
+                "Send Slack notification to developers"
+            );
+
+            long startTime = System.currentTimeMillis();
+
+            mockMvc.perform(post(BASE_URL + "/batch")
+                    .content(objectMapper.writeValueAsString(batchPrompts))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.results").isArray())
+                .andExpected(jsonPath("$.results.length()").value(5))
+                .andExpected(jsonPath("$.summary.totalRequests").value(5));
+
+            long processingTime = System.currentTimeMillis() - startTime;
+            
+            // Batch processing should be more efficient than individual requests
+            Assertions.assertTrue(processingTime < 5000, 
+                "Batch processing took too long: " + processingTime + "ms");
+        }
+    }
+
+    @Nested
+    @DisplayName("Cache Integration Tests")
+    class CacheIntegrationTests {
+
+        @Test
+        @Order(10)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should use cache for repeated requests")
+        void cacheRepeatedRequests() throws Exception {
+            String prompt = "Send status update to team";
+
+            // First request - should miss cache
+            long firstStart = System.currentTimeMillis();
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", prompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.fromCache").value(false));
+            long firstDuration = System.currentTimeMillis() - firstStart;
+
+            // Second request - should hit cache
+            long secondStart = System.currentTimeMillis();
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", prompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.fromCache").value(true));
+            long secondDuration = System.currentTimeMillis() - secondStart;
+
+            // Cache hit should be significantly faster
+            Assertions.assertTrue(secondDuration < firstDuration / 2,
+                String.format("Cache didn't improve performance. First: %dms, Second: %dms", 
+                    firstDuration, secondDuration));
+        }
+
+        @Test
+        @Order(11)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"memory:write"})
+        @DisplayName("Should invalidate cache when preferences change")
+        void cacheInvalidationOnPreferenceUpdate() throws Exception {
+            String prompt = "Create meeting agenda";
+
+            // Initial request
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", prompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk());
+
+            // Update preferences - should invalidate cache
+            UserPreferenceUpdate preferences = UserPreferenceUpdate.builder()
+                .maxRecommendations(3)
+                .minConfidenceThreshold(0.9)
+                .build();
+
+            mockMvc.perform(put(BASE_URL + "/preferences")
+                    .content(objectMapper.writeValueAsString(preferences))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk());
+
+            // Same request after preference update - should miss cache
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", prompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.fromCache").value(false));
+        }
+    }
+
+    @Nested
+    @DisplayName("Async Processing Tests")
+    class AsyncProcessingTests {
+
+        @Test
+        @Order(20)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should handle async recommendation requests")
+        void asyncRecommendationProcessing() throws Exception {
+            String prompt = "Analyze quarterly sales data and create executive summary";
+            
+            RecommendationRequest asyncRequest = RecommendationRequest.builder()
+                .async(true)
+                .maxRecommendations(10)
+                .includeExplanations(true)
+                .build();
+
+            mockMvc.perform(post(BASE_URL + "/recommendations")
+                    .param("prompt", prompt)
+                    .content(objectMapper.writeValueAsString(asyncRequest))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isAccepted())
+                .andExpected(jsonPath("$.status").value("PROCESSING"))
+                .andExpected(jsonPath("$.requestId").exists())
+                .andExpected(jsonPath("$.websocketTopic").value("/queue/async-results"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Security Integration Tests")
+    class SecurityIntegrationTests {
+
+        @Test
+        @Order(30)
+        @DisplayName("Should require authentication for protected endpoints")
+        void requireAuthenticationForProtectedEndpoints() throws Exception {
+            // Test without authentication
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", "test prompt")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isUnauthorized());
+
+            mockMvc.perform(post(BASE_URL + "/recommendations")
+                    .param("prompt", "test prompt")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isUnauthorized());
+
+            mockMvc.perform(post(BASE_URL + "/feedback")
+                    .content("{\"recommendationId\":\"test\"}")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isUnauthorized());
+        }
+
+        @Test
+        @Order(31)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"wrong:permission"})
+        @DisplayName("Should enforce role-based access control")
+        void enforceRoleBasedAccessControl() throws Exception {
+            // Test with insufficient permissions
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", "test prompt")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isForbidden());
+
+            mockMvc.perform(get(BASE_URL + "/history")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isForbidden());
+
+            mockMvc.perform(put(BASE_URL + "/preferences")
+                    .content("{}")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isForbidden());
+        }
+
+        @Test
+        @Order(32)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should validate and sanitize input data")
+        void validateAndSanitizeInputData() throws Exception {
+            // Test with potentially malicious input
+            String maliciousPrompt = "<script>alert('xss')</script>Send email";
+            
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", maliciousPrompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+
+            // Test with SQL injection attempt
+            String sqlInjectionPrompt = "'; DROP TABLE users; --";
+            
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", sqlInjectionPrompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+        }
+    }
+
+    @Nested
+    @DisplayName("Performance and Monitoring Tests")
+    class PerformanceMonitoringTests {
+
+        @Test
+        @Order(40)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"analytics:read"})
+        @DisplayName("Should provide performance analytics")
+        void performanceAnalytics() throws Exception {
+            // Generate some activity first
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", "test analytics prompt")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk());
+
+            // Check analytics
+            mockMvc.perform(get(BASE_URL + "/analytics")
+                    .param("timeframeDays", "1")
+                    .param("includeUserMetrics", "true")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.userMetrics").exists())
+                .andExpected(jsonPath("$.serviceMetrics").exists())
+                .andExpected(jsonPath("$.serviceHealth").exists());
+        }
+
+        @Test
+        @Order(41)
+        @DisplayName("Should monitor service health")
+        void serviceHealthMonitoring() throws Exception {
+            mockMvc.perform(get(BASE_URL + "/health")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.healthy").value(true))
+                .andExpected(jsonPath("$.status").value("UP"))
+                .andExpected(jsonPath("$.controller").value("PluginDiscoveryController"))
+                .andExpected(jsonPath("$.version").exists())
+                .andExpected(jsonPath("$.timestamp").exists());
+        }
+    }
+
+    @Nested
+    @DisplayName("Error Handling Integration Tests")
+    class ErrorHandlingIntegrationTests {
+
+        @Test
+        @Order(50)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should handle validation errors gracefully")
+        void handleValidationErrorsGracefully() throws Exception {
+            // Test empty prompt
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", "")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest())
+                .andExpected(jsonPath("$.error").exists());
+
+            // Test prompt too long
+            String longPrompt = "a".repeat(6000);
+            mockMvc.perform(post(BASE_URL + "/analyze")
+                    .param("prompt", longPrompt)
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+        }
+
+        @Test
+        @Order(51)
+        @WithMockUser(username = TEST_USER_ID, authorities = {"prompts:execute"})
+        @DisplayName("Should handle service errors with proper error responses")
+        void handleServiceErrorsWithProperResponses() throws Exception {
+            // Test invalid JSON in request body
+            mockMvc.perform(post(BASE_URL + "/recommendations")
+                    .param("prompt", "valid prompt")
+                    .content("invalid json")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+
+            // Test invalid feedback structure
+            mockMvc.perform(post(BASE_URL + "/feedback")
+                    .content("{\"invalidField\": \"value\"}")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+        }
+    }
+
+    @AfterEach
+    void cleanup() {
+        // Clean up any test data or reset state if needed
+    }
+}

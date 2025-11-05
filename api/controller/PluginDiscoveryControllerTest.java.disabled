@@ -1,0 +1,736 @@
+package api.controller;
+
+import api.dto.RecommendationRequest;
+import api.dto.RecommendationResponse;
+import api.dto.RecommendationFeedback;
+import api.dto.UserPreferenceUpdate;
+import api.exception.PluginDiscoveryException;
+import api.security.UserPrincipal;
+import api.service.SmartPluginSuggestionService;
+import api.validation.PluginDiscoveryValidator;
+
+import core.PluginRecommendation;
+import core.PluginOpportunity;
+import core.PluginMatchScore;
+import core.RecommendationStrategy;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithMockUser;
+import org.springframework.test.context.junit.jupiter.SpringJUnitExtension;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.CompletableFuture;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * Comprehensive test suite for PluginDiscoveryController
+ * 
+ * Tests all REST endpoints with various scenarios including:
+ * - Success cases with valid inputs
+ * - Error handling with invalid inputs
+ * - Security and authentication scenarios
+ * - Rate limiting and validation
+ * - Async processing
+ * - Edge cases and boundary conditions
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.2a
+ */
+@ExtendWith(SpringJUnitExtension.class)
+@WebMvcTest(PluginDiscoveryController.class)
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class PluginDiscoveryControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @MockBean
+    private SmartPluginSuggestionService smartPluginService;
+
+    @MockBean
+    private PluginDiscoveryValidator validator;
+
+    @Captor
+    private ArgumentCaptor<String> promptCaptor;
+
+    @Captor
+    private ArgumentCaptor<String> userIdCaptor;
+
+    @Captor
+    private ArgumentCaptor<RecommendationRequest> requestCaptor;
+
+    private UserPrincipal testUser;
+    private RecommendationResponse mockResponse;
+    private List<PluginRecommendation> mockRecommendations;
+
+    @BeforeEach
+    void setUp() {
+        testUser = UserPrincipal.builder()
+            .userId("test-user-123")
+            .username("testuser")
+            .email("test@example.com")
+            .authorities(Set.of("prompts:execute", "memory:read", "memory:write", "analytics:read"))
+            .build();
+
+        mockRecommendations = createMockRecommendations();
+        mockResponse = createMockResponse();
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/plugin-discovery/analyze")
+    class AnalyzePromptTests {
+
+        @Test
+        @Order(1)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should successfully analyze valid prompt")
+        void analyzePrompt_ValidInput_ReturnsRecommendations() throws Exception {
+            // Arrange
+            String prompt = "Send an email to team@company.com with project update";
+            when(smartPluginService.analyzePrompt(anyString(), anyString(), any()))
+                .thenReturn(mockResponse);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/analyze")
+                    .param("prompt", prompt)
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.recommendations").isArray())
+                .andExpect(jsonPath("$.recommendations.length()").value(mockRecommendations.size()))
+                .andExpect(jsonPath("$.userId").value(testUser.getUserId()))
+                .andExpect(jsonPath("$.processingTimeMs").isNumber());
+
+            // Verify service calls
+            verify(validator).validatePrompt(prompt);
+            verify(smartPluginService).analyzePrompt(eq(prompt), eq(testUser.getUserId()), any());
+        }
+
+        @Test
+        @Order(2)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should handle prompt analysis with context data")
+        void analyzePrompt_WithContextData_ReturnsRecommendations() throws Exception {
+            // Arrange
+            String prompt = "Create a report file";
+            Map<String, Object> contextData = Map.of(
+                "currentProject", "Q4-Report",
+                "userRole", "analyst"
+            );
+
+            when(smartPluginService.analyzePrompt(anyString(), anyString(), any()))
+                .thenReturn(mockResponse);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/analyze")
+                    .param("prompt", prompt)
+                    .param("contextData", objectMapper.writeValueAsString(contextData))
+                    .param("sessionId", "session-123")
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpect(jsonPath("$.sessionId").value("session-123"));
+
+            verify(validator).validateContextData(any());
+        }
+
+        @Test
+        @Order(3)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should return 400 for invalid prompt")
+        void analyzePrompt_InvalidPrompt_Returns400() throws Exception {
+            // Arrange
+            String invalidPrompt = "ab"; // Too short
+            doThrow(new PluginDiscoveryException(
+                PluginDiscoveryException.ErrorType.PROMPT_VALIDATION_ERROR,
+                "Prompt too short"
+            )).when(validator).validatePrompt(invalidPrompt);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/analyze")
+                    .param("prompt", invalidPrompt)
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest());
+
+            verify(validator).validatePrompt(invalidPrompt);
+            verifyNoInteractions(smartPluginService);
+        }
+
+        @Test
+        @Order(4)
+        @DisplayName("Should return 401 without authentication")
+        void analyzePrompt_NoAuth_Returns401() throws Exception {
+            mockMvc.perform(post("/api/v1/plugin-discovery/analyze")
+                    .param("prompt", "test prompt")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isUnauthorized());
+        }
+
+        @Test
+        @Order(5)
+        @WithMockUser(authorities = {"wrong:permission"})
+        @DisplayName("Should return 403 with insufficient permissions")
+        void analyzePrompt_InsufficientPermissions_Returns403() throws Exception {
+            mockMvc.perform(post("/api/v1/plugin-discovery/analyze")
+                    .param("prompt", "test prompt")
+                    .with(user(testUser.toBuilder().authorities(Set.of("wrong:permission")).build()))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isForbidden());
+        }
+
+        @Test
+        @Order(6)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should handle service errors gracefully")
+        void analyzePrompt_ServiceError_Returns500() throws Exception {
+            // Arrange
+            String prompt = "test prompt";
+            when(smartPluginService.analyzePrompt(anyString(), anyString(), any()))
+                .thenThrow(new RuntimeException("Service unavailable"));
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/analyze")
+                    .param("prompt", prompt)
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isInternalServerError());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/plugin-discovery/recommendations")
+    class GetRecommendationsTests {
+
+        @Test
+        @Order(10)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should generate recommendations synchronously")
+        void getRecommendations_SyncProcessing_ReturnsRecommendations() throws Exception {
+            // Arrange
+            String prompt = "Schedule a meeting";
+            RecommendationRequest request = RecommendationRequest.builder()
+                .maxRecommendations(5)
+                .minConfidenceThreshold(0.7)
+                .async(false)
+                .build();
+
+            when(smartPluginService.getRecommendations(anyString(), anyString(), any()))
+                .thenReturn(mockResponse);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/recommendations")
+                    .param("prompt", prompt)
+                    .content(objectMapper.writeValueAsString(request))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.asyncProcessed").value(false));
+
+            verify(smartPluginService).getRecommendations(eq(prompt), eq(testUser.getUserId()), any());
+        }
+
+        @Test
+        @Order(11)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should handle async processing request")
+        void getRecommendations_AsyncProcessing_Returns202() throws Exception {
+            // Arrange
+            String prompt = "Create a presentation";
+            RecommendationRequest request = RecommendationRequest.builder()
+                .async(true)
+                .build();
+
+            CompletableFuture<RecommendationResponse> futureResponse = 
+                CompletableFuture.completedFuture(mockResponse);
+            when(smartPluginService.getRecommendationsAsync(anyString(), anyString(), any()))
+                .thenReturn(futureResponse);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/recommendations")
+                    .param("prompt", prompt)
+                    .content(objectMapper.writeValueAsString(request))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.status").value("PROCESSING"))
+                .andExpect(jsonPath("$.requestId").exists())
+                .andExpect(jsonPath("$.websocketTopic").value("/queue/async-results"));
+
+            verify(smartPluginService).getRecommendationsAsync(eq(prompt), eq(testUser.getUserId()), any());
+        }
+
+        @Test
+        @Order(12)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should use default request when none provided")
+        void getRecommendations_NoRequest_UsesDefaults() throws Exception {
+            // Arrange
+            String prompt = "Send notification";
+            when(smartPluginService.getRecommendations(anyString(), anyString(), any()))
+                .thenReturn(mockResponse);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/recommendations")
+                    .param("prompt", prompt)
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk());
+
+            verify(smartPluginService).getRecommendations(eq(prompt), eq(testUser.getUserId()), any());
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/plugin-discovery/feedback")
+    class RecordFeedbackTests {
+
+        @Test
+        @Order(20)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should record feedback successfully")
+        void recordFeedback_ValidFeedback_Returns201() throws Exception {
+            // Arrange
+            RecommendationFeedback feedback = RecommendationFeedback.builder()
+                .recommendationId("rec-123")
+                .selectedPlugin("EmailPlugin")
+                .wasSuccessful(true)
+                .userRating(4)
+                .feedbackText("Plugin worked well")
+                .build();
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/feedback")
+                    .content(objectMapper.writeValueAsString(feedback))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.recommendationId").value("rec-123"))
+                .andExpected(jsonPath("$.feedbackType").exists());
+
+            verify(validator).validateFeedback(any());
+            verify(smartPluginService).recordFeedback(eq(testUser.getUserId()), eq("rec-123"), any());
+        }
+
+        @Test
+        @Order(21)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should validate feedback data")
+        void recordFeedback_InvalidFeedback_Returns400() throws Exception {
+            // Arrange
+            RecommendationFeedback invalidFeedback = RecommendationFeedback.builder()
+                .recommendationId("") // Invalid empty ID
+                .selectedPlugin("EmailPlugin")
+                .build();
+
+            doThrow(new PluginDiscoveryException(
+                PluginDiscoveryException.ErrorType.FEEDBACK_VALIDATION_ERROR,
+                "Invalid feedback data"
+            )).when(validator).validateFeedback(any());
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/feedback")
+                    .content(objectMapper.writeValueAsString(invalidFeedback))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isBadRequest());
+
+            verifyNoInteractions(smartPluginService);
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /api/v1/plugin-discovery/history")
+    class GetRecommendationHistoryTests {
+
+        @Test
+        @Order(30)
+        @WithMockUser(authorities = {"memory:read"})
+        @DisplayName("Should retrieve recommendation history with default parameters")
+        void getHistory_DefaultParams_ReturnsHistory() throws Exception {
+            // Arrange
+            List<RecommendationResponse> history = List.of(mockResponse);
+            when(smartPluginService.getRecommendationHistory(anyString(), any()))
+                .thenReturn(history);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/v1/plugin-discovery/history")
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.history").isArray())
+                .andExpect(jsonPath("$.totalCount").value(1))
+                .andExpect(jsonPath("$.timeframeDays").value(30));
+
+            verify(smartPluginService).getRecommendationHistory(eq(testUser.getUserId()), any());
+        }
+
+        @Test
+        @Order(31)
+        @WithMockUser(authorities = {"memory:read"})
+        @DisplayName("Should apply filters to history results")
+        void getHistory_WithFilters_ReturnsFilteredHistory() throws Exception {
+            // Arrange
+            List<RecommendationResponse> history = List.of(mockResponse);
+            when(smartPluginService.getRecommendationHistory(anyString(), any()))
+                .thenReturn(history);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/v1/plugin-discovery/history")
+                    .param("timeframeDays", "7")
+                    .param("limit", "10")
+                    .param("pluginFilter", "Email")
+                    .param("successfulOnly", "true")
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpect(jsonPath("$.timeframeDays").value(7))
+                .andExpected(jsonPath("$.filters.pluginFilter").value("Email"))
+                .andExpected(jsonPath("$.filters.successfulOnly").value(true));
+        }
+
+        @Test
+        @Order(32)
+        @WithMockUser(authorities = {"wrong:permission"})
+        @DisplayName("Should require memory:read permission")
+        void getHistory_InsufficientPermissions_Returns403() throws Exception {
+            mockMvc.perform(get("/api/v1/plugin-discovery/history")
+                    .with(user(testUser.toBuilder().authorities(Set.of("wrong:permission")).build()))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isForbidden());
+        }
+    }
+
+    @Nested
+    @DisplayName("PUT /api/v1/plugin-discovery/preferences")
+    class UpdateUserPreferencesTests {
+
+        @Test
+        @Order(40)
+        @WithMockUser(authorities = {"memory:write"})
+        @DisplayName("Should update user preferences successfully")
+        void updatePreferences_ValidPreferences_ReturnsSuccess() throws Exception {
+            // Arrange
+            UserPreferenceUpdate preferences = UserPreferenceUpdate.builder()
+                .maxRecommendations(10)
+                .minConfidenceThreshold(0.8)
+                .enablePersonalization(true)
+                .preferredCommunicationChannel("email")
+                .build();
+
+            // Act & Assert
+            mockMvc.perform(put("/api/v1/plugin-discovery/preferences")
+                    .content(objectMapper.writeValueAsString(preferences))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpect(status().isOk())
+                .andExpected(jsonPath("$.success").value(true))
+                .andExpected(jsonPath("$.preferences.maxRecommendations").value(10));
+
+            verify(validator).validatePreferences(any());
+            verify(smartPluginService).updateUserPreferences(eq(testUser.getUserId()), any());
+        }
+
+        @Test
+        @Order(41)
+        @WithMockUser(authorities = {"memory:write"})
+        @DisplayName("Should validate preferences before updating")
+        void updatePreferences_InvalidPreferences_Returns400() throws Exception {
+            // Arrange
+            UserPreferenceUpdate invalidPreferences = UserPreferenceUpdate.builder()
+                .maxRecommendations(-1) // Invalid negative value
+                .build();
+
+            doThrow(new PluginDiscoveryException(
+                PluginDiscoveryException.ErrorType.PREFERENCES_VALIDATION_ERROR,
+                "Invalid preferences"
+            )).when(validator).validatePreferences(any());
+
+            // Act & Assert
+            mockMvc.perform(put("/api/v1/plugin-discovery/preferences")
+                    .content(objectMapper.writeValueAsString(invalidPreferences))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+
+            verifyNoInteractions(smartPluginService);
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /api/v1/plugin-discovery/analytics")
+    class GetRecommendationAnalyticsTests {
+
+        @Test
+        @Order(50)
+        @WithMockUser(authorities = {"analytics:read"})
+        @DisplayName("Should retrieve analytics with default parameters")
+        void getAnalytics_DefaultParams_ReturnsAnalytics() throws Exception {
+            // Arrange
+            Map<String, Object> userMetrics = Map.of("totalRequests", 100, "successRate", 0.95);
+            Map<String, Object> healthStatus = Map.of(
+                "healthy", true,
+                "status", "UP",
+                "metrics", Map.of("cacheHitRate", 0.8)
+            );
+
+            when(smartPluginService.getRecommendationMetrics(anyString())).thenReturn(userMetrics);
+            when(smartPluginService.getHealthStatus()).thenReturn(healthStatus);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/v1/plugin-discovery/analytics")
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpect(jsonPath("$.timeframeDays").value(7))
+                .andExpected(jsonPath("$.userMetrics").exists())
+                .andExpected(jsonPath("$.serviceMetrics").exists())
+                .andExpected(jsonPath("$.serviceHealth.status").value("UP"));
+        }
+
+        @Test
+        @Order(51)
+        @WithMockUser(authorities = {"admin:all"})
+        @DisplayName("Should allow admin access to analytics")
+        void getAnalytics_AdminUser_ReturnsAnalytics() throws Exception {
+            // Arrange
+            UserPrincipal adminUser = testUser.toBuilder()
+                .authorities(Set.of("admin:all"))
+                .build();
+
+            Map<String, Object> healthStatus = Map.of("healthy", true, "status", "UP");
+            when(smartPluginService.getHealthStatus()).thenReturn(healthStatus);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/v1/plugin-discovery/analytics")
+                    .with(user(adminUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk());
+        }
+    }
+
+    @Nested
+    @DisplayName("GET /api/v1/plugin-discovery/health")
+    class GetServiceHealthTests {
+
+        @Test
+        @Order(60)
+        @DisplayName("Should return health status without authentication")
+        void getHealth_NoAuth_ReturnsHealthStatus() throws Exception {
+            // Arrange
+            Map<String, Object> healthStatus = Map.of(
+                "healthy", true,
+                "status", "UP",
+                "serviceVersion", "1.0.0"
+            );
+
+            when(smartPluginService.getHealthStatus()).thenReturn(healthStatus);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/v1/plugin-discovery/health")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.healthy").value(true))
+                .andExpected(jsonPath("$.status").value("UP"))
+                .andExpected(jsonPath("$.controller").value("PluginDiscoveryController"));
+        }
+
+        @Test
+        @Order(61)
+        @DisplayName("Should return 503 for unhealthy service")
+        void getHealth_UnhealthyService_Returns503() throws Exception {
+            // Arrange
+            Map<String, Object> healthStatus = Map.of(
+                "healthy", false,
+                "status", "DOWN",
+                "error", "Database connection failed"
+            );
+
+            when(smartPluginService.getHealthStatus()).thenReturn(healthStatus);
+
+            // Act & Assert
+            mockMvc.perform(get("/api/v1/plugin-discovery/health")
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isServiceUnavailable())
+                .andExpected(jsonPath("$.healthy").value(false))
+                .andExpected(jsonPath("$.status").value("DOWN"));
+        }
+    }
+
+    @Nested
+    @DisplayName("POST /api/v1/plugin-discovery/batch")
+    class ProcessBatchRecommendationsTests {
+
+        @Test
+        @Order(70)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should process batch requests successfully")
+        void processBatch_ValidBatch_ReturnsResults() throws Exception {
+            // Arrange
+            List<String> prompts = List.of(
+                "Send email to team",
+                "Create project report",
+                "Schedule meeting"
+            );
+
+            List<RecommendationResponse> batchResults = List.of(
+                mockResponse, mockResponse, mockResponse
+            );
+
+            when(smartPluginService.processBatchRecommendations(anyString(), anyList()))
+                .thenReturn(batchResults);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/batch")
+                    .content(objectMapper.writeValueAsString(prompts))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isOk())
+                .andExpected(jsonPath("$.results").isArray())
+                .andExpected(jsonPath("$.results.length()").value(3))
+                .andExpected(jsonPath("$.summary.totalRequests").value(3))
+                .andExpected(jsonPath("$.summary.successCount").value(3));
+
+            verify(smartPluginService).processBatchRecommendations(eq(testUser.getUserId()), eq(prompts));
+        }
+
+        @Test
+        @Order(71)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should validate batch size limits")
+        void processBatch_TooLarge_Returns400() throws Exception {
+            // Arrange
+            List<String> largeBatch = Collections.nCopies(51, "test prompt");
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/batch")
+                    .content(objectMapper.writeValueAsString(largeBatch))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isBadRequest());
+
+            verifyNoInteractions(smartPluginService);
+        }
+
+        @Test
+        @Order(72)
+        @WithMockUser(authorities = {"prompts:execute"})
+        @DisplayName("Should handle partial batch failures")
+        void processBatch_PartialFailure_Returns206() throws Exception {
+            // Arrange
+            List<String> prompts = List.of("valid prompt", "another prompt");
+            
+            RecommendationResponse successResponse = mockResponse;
+            RecommendationResponse failureResponse = RecommendationResponse.builder()
+                .success(false)
+                .errorMessage("Processing failed")
+                .build();
+
+            List<RecommendationResponse> batchResults = List.of(successResponse, failureResponse);
+
+            when(smartPluginService.processBatchRecommendations(anyString(), anyList()))
+                .thenReturn(batchResults);
+
+            // Act & Assert
+            mockMvc.perform(post("/api/v1/plugin-discovery/batch")
+                    .content(objectMapper.writeValueAsString(prompts))
+                    .with(user(testUser))
+                    .contentType(MediaType.APPLICATION_JSON))
+                .andExpected(status().isPartialContent())
+                .andExpected(jsonPath("$.summary.successCount").value(1))
+                .andExpected(jsonPath("$.summary.failureCount").value(1));
+        }
+    }
+
+    // Helper methods for creating test data
+
+    private List<PluginRecommendation> createMockRecommendations() {
+        PluginOpportunity emailOpportunity = PluginOpportunity.builder()
+            .id("opp-email-123")
+            .pluginId("EmailPlugin")
+            .detectedIntent("SEND_EMAIL")
+            .confidence(PluginMatchScore.builder()
+                .intentMatch(0.9)
+                .entityMatch(0.8)
+                .contextMatch(0.7)
+                .build())
+            .promptContext("send email")
+            .build();
+
+        PluginRecommendation emailRec = PluginRecommendation.builder()
+            .recommendationId("rec-email-123")
+            .opportunity(emailOpportunity)
+            .rank(1)
+            .finalConfidence(0.85)
+            .usedStrategy(RecommendationStrategy.StrategyType.INTENT_BASED)
+            .explanationFactors(List.of("High intent match", "Entity extraction successful"))
+            .build();
+
+        PluginOpportunity fileOpportunity = PluginOpportunity.builder()
+            .id("opp-file-456")
+            .pluginId("FilePlugin")
+            .detectedIntent("CREATE_FILE")
+            .confidence(PluginMatchScore.builder()
+                .intentMatch(0.7)
+                .entityMatch(0.6)
+                .contextMatch(0.8)
+                .build())
+            .promptContext("create file")
+            .build();
+
+        PluginRecommendation fileRec = PluginRecommendation.builder()
+            .recommendationId("rec-file-456")
+            .opportunity(fileOpportunity)
+            .rank(2)
+            .finalConfidence(0.7)
+            .usedStrategy(RecommendationStrategy.StrategyType.CONTEXT_BASED)
+            .explanationFactors(List.of("Context match", "Plugin availability"))
+            .build();
+
+        return List.of(emailRec, fileRec);
+    }
+
+    private RecommendationResponse createMockResponse() {
+        return RecommendationResponse.builder()
+            .requestId("req-123")
+            .userId(testUser.getUserId())
+            .recommendations(mockRecommendations)
+            .success(true)
+            .timestamp(Instant.now())
+            .processingTimeMs(150L)
+            .fromCache(false)
+            .asyncProcessed(false)
+            .maxRecommendations(10)
+            .minConfidenceThreshold(0.3)
+            .totalCandidates(5)
+            .filteredCount(2)
+            .build();
+    }
+
+    @AfterEach
+    void tearDown() {
+        reset(smartPluginService, validator);
+    }
+}

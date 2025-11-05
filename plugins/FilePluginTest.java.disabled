@@ -1,0 +1,448 @@
+package plugins.file;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.*;
+
+import core.ExecutionResult;
+import java.util.Map;
+import java.util.HashMap;
+import java.nio.file.Path;
+import java.nio.file.Files;
+
+class FilePluginTest {
+    
+    private FilePlugin mockFilePlugin;
+    private FilePlugin realFilePlugin;
+    
+    @TempDir
+    Path tempDir;
+    
+    @BeforeEach
+    void setUp() {
+        mockFilePlugin = new FilePlugin(); // Mock mode by default
+        realFilePlugin = new FilePlugin(false, tempDir.toString());
+    }
+    
+    @Test
+    @DisplayName("Should create file in mock mode")
+    void testCreateFileMockMode() {
+        Map<String, Object> context = Map.of(
+            "filename", "test.txt",
+            "content", "Hello world"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("Mock file created successfully", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("created_mock", data.get("status"));
+        assertEquals("test.txt", data.get("filename"));
+        assertEquals("Hello world", data.get("fileContent"));
+        assertEquals(11, data.get("contentLength"));
+        assertNotNull(data.get("timestamp"));
+    }
+    
+    @Test
+    @DisplayName("Should create real file")
+    void testCreateRealFile() throws Exception {
+        Map<String, Object> context = Map.of(
+            "filename", "real_test.txt",
+            "content", "Real file content"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("File created successfully", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("created_real", data.get("status"));
+        assertEquals("real_test.txt", data.get("filename"));
+        assertEquals("Real file content", data.get("fileContent"));
+        assertEquals(17, data.get("contentLength"));
+        
+        // Verify file actually exists
+        Path filePath = tempDir.resolve("real_test.txt");
+        assertTrue(Files.exists(filePath));
+        assertEquals("Real file content", Files.readString(filePath));
+    }
+    
+    @Test
+    @DisplayName("Should handle empty filename")
+    void testEmptyFilename() {
+        Map<String, Object> context = Map.of(
+            "filename", "",
+            "content", "Some content"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertFalse(result.isSuccess());
+        assertEquals("Filename cannot be empty", result.getMessage());
+    }
+    
+    @Test
+    @DisplayName("Should handle invalid filename")
+    void testInvalidFilename() {
+        Map<String, Object> context = Map.of(
+            "filename", "invalid<file>name.txt",
+            "content", "Some content"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertFalse(result.isSuccess());
+        assertTrue(result.getMessage().contains("Invalid filename"));
+    }
+    
+    @Test
+    @DisplayName("Should use default filename when not provided")
+    void testDefaultFilename() {
+        Map<String, Object> context = Map.of(
+            "content", "Default file content"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("untitled.txt", data.get("filename"));
+    }
+    
+    @Test
+    @DisplayName("Should use empty content when not provided")
+    void testDefaultContent() {
+        Map<String, Object> context = Map.of(
+            "filename", "empty.txt"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("", data.get("fileContent"));
+        assertEquals(0, data.get("contentLength"));
+    }
+    
+    @Test
+    @DisplayName("Should read file in mock mode")
+    void testReadFileMockMode() {
+        Map<String, Object> context = Map.of(
+            "filename", "read_test.txt",
+            "operation", "read"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("Mock file read successfully", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("read_mock", data.get("status"));
+        assertEquals("read_test.txt", data.get("filename"));
+        assertEquals("Mock content for read_test.txt", data.get("fileContent"));
+    }
+    
+    @Test
+    @DisplayName("Should read real file")
+    void testReadRealFile() throws Exception {
+        // First create a file
+        Path filePath = tempDir.resolve("read_real.txt");
+        Files.writeString(filePath, "Content to read");
+        
+        Map<String, Object> context = Map.of(
+            "filename", "read_real.txt",
+            "operation", "read"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("File read successfully", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("read_real", data.get("status"));
+        assertEquals("read_real.txt", data.get("filename"));
+        assertEquals("Content to read", data.get("fileContent"));
+        assertEquals(15, data.get("contentLength"));
+    }
+    
+    @Test
+    @DisplayName("Should fail to read non-existent file")
+    void testReadNonExistentFile() {
+        Map<String, Object> context = Map.of(
+            "filename", "nonexistent.txt",
+            "operation", "read"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertFalse(result.isSuccess());
+        assertTrue(result.getMessage().contains("File does not exist"));
+    }
+    
+    @Test
+    @DisplayName("Should append to file in mock mode")
+    void testAppendFileMockMode() {
+        Map<String, Object> context = Map.of(
+            "filename", "append_test.txt",
+            "content", "Appended content",
+            "operation", "append"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("Mock file append successful", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("appended_mock", data.get("status"));
+        assertEquals("append_test.txt", data.get("filename"));
+        assertEquals("Appended content", data.get("appendedContent"));
+        assertEquals(16, data.get("appendedLength"));
+    }
+    
+    @Test
+    @DisplayName("Should append to real file")
+    void testAppendRealFile() throws Exception {
+        // First create a file
+        Path filePath = tempDir.resolve("append_real.txt");
+        Files.writeString(filePath, "Initial content\n");
+        
+        Map<String, Object> context = Map.of(
+            "filename", "append_real.txt",
+            "content", "Appended line",
+            "operation", "append"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("File append successful", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("appended_real", data.get("status"));
+        assertEquals("append_real.txt", data.get("filename"));
+        assertEquals("Appended line", data.get("appendedContent"));
+        
+        // Verify file content
+        String fileContent = Files.readString(filePath);
+        assertEquals("Initial content\nAppended line", fileContent);
+    }
+    
+    @Test
+    @DisplayName("Should create file when appending to non-existent file")
+    void testAppendToNonExistentFile() throws Exception {
+        Map<String, Object> context = Map.of(
+            "filename", "new_append.txt",
+            "content", "New file content",
+            "operation", "append"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("File append successful", result.getMessage());
+        
+        // Verify file was created
+        Path filePath = tempDir.resolve("new_append.txt");
+        assertTrue(Files.exists(filePath));
+        assertEquals("New file content", Files.readString(filePath));
+    }
+    
+    @Test
+    @DisplayName("Should delete file in mock mode")
+    void testDeleteFileMockMode() {
+        Map<String, Object> context = Map.of(
+            "filename", "delete_test.txt",
+            "operation", "delete"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("Mock file deleted successfully", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("deleted_mock", data.get("status"));
+        assertEquals("delete_test.txt", data.get("filename"));
+    }
+    
+    @Test
+    @DisplayName("Should delete real file")
+    void testDeleteRealFile() throws Exception {
+        // First create a file
+        Path filePath = tempDir.resolve("delete_real.txt");
+        Files.writeString(filePath, "File to delete");
+        assertTrue(Files.exists(filePath));
+        
+        Map<String, Object> context = Map.of(
+            "filename", "delete_real.txt",
+            "operation", "delete"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        assertEquals("File deleted successfully", result.getMessage());
+        
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("deleted_real", data.get("status"));
+        assertEquals("delete_real.txt", data.get("filename"));
+        
+        // Verify file was deleted
+        assertFalse(Files.exists(filePath));
+    }
+    
+    @Test
+    @DisplayName("Should fail to delete non-existent file")
+    void testDeleteNonExistentFile() {
+        Map<String, Object> context = Map.of(
+            "filename", "nonexistent_delete.txt",
+            "operation", "delete"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertFalse(result.isSuccess());
+        assertTrue(result.getMessage().contains("File does not exist"));
+    }
+    
+    @Test
+    @DisplayName("Should handle unsupported operation")
+    void testUnsupportedOperation() {
+        Map<String, Object> context = Map.of(
+            "filename", "test.txt",
+            "operation", "unsupported"
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertFalse(result.isSuccess());
+        assertTrue(result.getMessage().contains("Unsupported operation"));
+    }
+    
+    @Test
+    @DisplayName("Should handle context with inputParams wrapper")
+    void testContextWithInputParams() {
+        Map<String, Object> inputParams = Map.of(
+            "filename", "wrapped_test.txt",
+            "content", "Wrapped content"
+        );
+        Map<String, Object> context = Map.of("inputParams", inputParams);
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals("wrapped_test.txt", data.get("filename"));
+        assertEquals("Wrapped content", data.get("fileContent"));
+    }
+    
+    @Test
+    @DisplayName("Should validate reserved filenames")
+    void testReservedFilenames() {
+        String[] reservedNames = {"CON.txt", "PRN.txt", "AUX.txt", "NUL.txt", "COM1.txt"};
+        
+        for (String reservedName : reservedNames) {
+            Map<String, Object> context = Map.of(
+                "filename", reservedName,
+                "content", "Test content"
+            );
+            
+            ExecutionResult result = mockFilePlugin.execute(context);
+            
+            assertFalse(result.isSuccess(), "Should reject reserved filename: " + reservedName);
+            assertTrue(result.getMessage().contains("Invalid filename"));
+        }
+    }
+    
+    @Test
+    @DisplayName("Should handle multiline content")
+    void testMultilineContent() {
+        String multilineContent = "Line 1\nLine 2\nLine 3\n";
+        Map<String, Object> context = Map.of(
+            "filename", "multiline.txt",
+            "content", multilineContent
+        );
+        
+        ExecutionResult result = mockFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) result.getData();
+        assertEquals(multilineContent, data.get("fileContent"));
+        assertEquals(multilineContent.length(), data.get("contentLength"));
+    }
+    
+    @Test
+    @DisplayName("Should return correct plugin name and description")
+    void testPluginMetadata() {
+        assertEquals("FilePlugin", mockFilePlugin.getName());
+        assertEquals("Handles file operations including create, read, append, and delete. Supports mock mode for testing.", 
+                    mockFilePlugin.getDescription());
+    }
+    
+    @Test
+    @DisplayName("Should report mock mode correctly")
+    void testMockModeReporting() {
+        assertTrue(mockFilePlugin.isMockMode());
+        assertFalse(realFilePlugin.isMockMode());
+        
+        assertEquals("Mock mode enabled", mockFilePlugin.getConfigSummary());
+        assertTrue(realFilePlugin.getConfigSummary().contains("Base directory"));
+    }
+    
+    @Test
+    @DisplayName("Should handle exception gracefully")
+    void testExceptionHandling() {
+        // Create a plugin with a path that will cause permission issues
+        FilePlugin invalidPlugin = new FilePlugin(false, "/root/restricted/path");
+        
+        Map<String, Object> context = Map.of(
+            "filename", "test.txt",
+            "content", "Test content"
+        );
+        
+        ExecutionResult result = invalidPlugin.execute(context);
+        
+        // The result should either fail due to permission issues or succeed if the path is created
+        // We just need to ensure no exception is thrown and a result is returned
+        assertNotNull(result);
+        assertNotNull(result.getMessage());
+    }
+    
+    @Test
+    @DisplayName("Should create parent directories when needed")
+    void testCreateParentDirectories() throws Exception {
+        Map<String, Object> context = Map.of(
+            "filename", "subdir/nested/file.txt",
+            "content", "Nested file content"
+        );
+        
+        ExecutionResult result = realFilePlugin.execute(context);
+        
+        assertTrue(result.isSuccess());
+        
+        // Verify file and directories were created
+        Path filePath = tempDir.resolve("subdir/nested/file.txt");
+        assertTrue(Files.exists(filePath));
+        assertEquals("Nested file content", Files.readString(filePath));
+    }
+}

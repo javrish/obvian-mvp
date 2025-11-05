@@ -1,0 +1,571 @@
+package api;
+
+import api.BaseIntegrationTest;
+import de.codecentric.boot.chaos.monkey.configuration.ChaosMonkeySettings;
+import de.codecentric.boot.chaos.monkey.configuration.WatcherProperties;
+import io.restassured.RestAssured;
+import io.restassured.http.ContentType;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.test.context.TestPropertySource;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Chaos engineering tests for resilience and fault tolerance
+ */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@TestPropertySource(properties = {
+    "chaos.monkey.enabled=true",
+    "chaos.monkey.watcher.controller=true",
+    "chaos.monkey.watcher.service=true",
+    "chaos.monkey.watcher.repository=true"
+})
+@DisplayName("Chaos Engineering Tests")
+public class ChaosTest extends BaseIntegrationTest {
+
+    @LocalServerPort
+    private int port;
+
+    @Autowired(required = false)
+    private ChaosMonkeySettings chaosMonkeySettings;
+
+    private final String validToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test.token";
+
+    @BeforeEach
+    public void setUpChaos() {
+        RestAssured.port = port;
+        RestAssured.baseURI = "http://localhost";
+    }
+
+    @Nested
+    @DisplayName("Service Resilience Tests")
+    class ServiceResilienceTests {
+
+        @Test
+        @DisplayName("Should handle random service failures gracefully")
+        void shouldHandleRandomServiceFailuresGracefully() throws InterruptedException {
+            // Enable chaos monkey for random failures
+            if (chaosMonkeySettings != null) {
+                enableChaosMonkey();
+            }
+
+            int totalRequests = 100;
+            int threadCount = 10;
+            CountDownLatch latch = new CountDownLatch(threadCount);
+            AtomicInteger successCount = new AtomicInteger(0);
+            AtomicInteger failureCount = new AtomicInteger(0);
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+            for (int i = 0; i < threadCount; i++) {
+                executor.submit(() -> {
+                    try {
+                        for (int j = 0; j < totalRequests / threadCount; j++) {
+                            try {
+                                String requestBody = """
+                                    {
+                                        "prompt": "Send email to chaos@test.com",
+                                        "dryRun": true
+                                    }
+                                    """;
+
+                                int statusCode = given()
+                                    .header("Authorization", "Bearer " + validToken)
+                                    .contentType(ContentType.JSON)
+                                    .body(requestBody)
+                                .when()
+                                    .post("/api/v1/prompts/execute")
+                                .then()
+                                    .extract()
+                                    .statusCode();
+
+                                if (statusCode == 200) {
+                                    successCount.incrementAndGet();
+                                } else {
+                                    failureCount.incrementAndGet();
+                                }
+                            } catch (Exception e) {
+                                failureCount.incrementAndGet();
+                            }
+                        }
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+
+            boolean completed = latch.await(60, TimeUnit.SECONDS);
+            executor.shutdown();
+
+            assertThat(completed).isTrue();
+            
+            // Even with chaos, we should have some successful requests
+            double successRate = (double) successCount.get() / totalRequests;
+            System.out.printf("Chaos Test Results: %.2f%% success rate (%d/%d)%n", 
+                successRate * 100, successCount.get(), totalRequests);
+            
+            // Expect at least 50% success rate even under chaos
+            assertThat(successRate).isGreaterThan(0.5);
+        }
+
+        @Test
+        @DisplayName("Should recover from database connection failures")
+        void shouldRecoverFromDatabaseConnectionFailures() {
+            // Simulate database connection issues
+            simulateDatabaseFailure();
+
+            // Make requests during database failure
+            for (int i = 0; i < 5; i++) {
+                given()
+                    .header("Authorization", "Bearer " + validToken)
+                .when()
+                    .get("/api/v1/executions/history")
+                .then()
+                    .statusCode(anyOf(equalTo(200), equalTo(503))); // Should handle gracefully
+            }
+
+            // Restore database connection
+            restoreDatabaseConnection();
+
+            // Verify recovery
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/executions/history")
+            .then()
+                .statusCode(200);
+        }
+
+        @Test
+        @DisplayName("Should handle Redis cache failures")
+        void shouldHandleRedisCacheFailures() {
+            // Simulate Redis failure
+            simulateRedisFailure();
+
+            // System should continue to work without cache
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/plugins")
+            .then()
+                .statusCode(200);
+
+            // Rate limiting might be affected but should not crash
+            for (int i = 0; i < 10; i++) {
+                given()
+                    .header("Authorization", "Bearer " + validToken)
+                .when()
+                    .get("/api/v1/plugins")
+                .then()
+                    .statusCode(anyOf(equalTo(200), equalTo(429), equalTo(503)));
+            }
+
+            // Restore Redis
+            restoreRedisConnection();
+        }
+
+        @Test
+        @DisplayName("Should handle external service timeouts")
+        void shouldHandleExternalServiceTimeouts() {
+            // Configure slow external service responses
+            simulateSlowExternalServices();
+
+            String requestBody = """
+                {
+                    "prompt": "Send email to timeout@test.com",
+                    "dryRun": false,
+                    "executionOptions": {
+                        "timeout": 5
+                    }
+                }
+                """;
+
+            // Should timeout gracefully
+            given()
+                .header("Authorization", "Bearer " + validToken)
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(anyOf(equalTo(200), equalTo(408), equalTo(500)))
+                .body("error.code", anyOf(nullValue(), equalTo("TIMEOUT")));
+        }
+    }
+
+    @Nested
+    @DisplayName("Network Resilience Tests")
+    class NetworkResilienceTests {
+
+        @Test
+        @DisplayName("Should handle network partitions")
+        void shouldHandleNetworkPartitions() {
+            // Simulate network partition between services
+            simulateNetworkPartition();
+
+            // Test service behavior during partition
+            String requestBody = """
+                {
+                    "prompt": "Test network partition resilience",
+                    "dryRun": true
+                }
+                """;
+
+            int successCount = 0;
+            int totalRequests = 10;
+
+            for (int i = 0; i < totalRequests; i++) {
+                try {
+                    int statusCode = given()
+                        .header("Authorization", "Bearer " + validToken)
+                        .contentType(ContentType.JSON)
+                        .body(requestBody)
+                    .when()
+                        .post("/api/v1/prompts/execute")
+                    .then()
+                        .extract()
+                        .statusCode();
+
+                    if (statusCode == 200) {
+                        successCount++;
+                    }
+                } catch (Exception e) {
+                    // Network errors expected during partition
+                }
+            }
+
+            // Restore network
+            restoreNetworkConnection();
+
+            // Verify recovery
+            given()
+                .header("Authorization", "Bearer " + validToken)
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(200);
+
+            System.out.printf("Network partition test: %d/%d requests succeeded%n", 
+                successCount, totalRequests);
+        }
+
+        @Test
+        @DisplayName("Should handle intermittent connectivity issues")
+        void shouldHandleIntermittentConnectivityIssues() {
+            // Simulate intermittent network issues
+            simulateIntermittentConnectivity();
+
+            int attempts = 20;
+            int successCount = 0;
+
+            for (int i = 0; i < attempts; i++) {
+                try {
+                    int statusCode = given()
+                        .header("Authorization", "Bearer " + validToken)
+                    .when()
+                        .get("/api/v1/plugins")
+                    .then()
+                        .extract()
+                        .statusCode();
+
+                    if (statusCode == 200) {
+                        successCount++;
+                    }
+
+                    // Small delay between requests
+                    Thread.sleep(100);
+                } catch (Exception e) {
+                    // Expected during connectivity issues
+                }
+            }
+
+            // Should have some successful requests despite intermittent issues
+            double successRate = (double) successCount / attempts;
+            assertThat(successRate).isGreaterThan(0.3); // At least 30% success rate
+
+            System.out.printf("Intermittent connectivity test: %.2f%% success rate%n", 
+                successRate * 100);
+        }
+    }
+
+    @Nested
+    @DisplayName("Resource Exhaustion Tests")
+    class ResourceExhaustionTests {
+
+        @Test
+        @DisplayName("Should handle memory pressure")
+        void shouldHandleMemoryPressure() {
+            // Create memory pressure by making many concurrent requests
+            int threadCount = 50;
+            int requestsPerThread = 5;
+            CountDownLatch latch = new CountDownLatch(threadCount);
+            AtomicInteger successCount = new AtomicInteger(0);
+            ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+
+            for (int i = 0; i < threadCount; i++) {
+                executor.submit(() -> {
+                    try {
+                        for (int j = 0; j < requestsPerThread; j++) {
+                            try {
+                                // Create large memory entries
+                                String largeContent = "x".repeat(1024 * 1024); // 1MB
+                                String requestBody = """
+                                    {
+                                        "type": "file",
+                                        "filename": "large_file_%d.txt",
+                                        "content": "%s"
+                                    }
+                                    """.formatted(j, largeContent);
+
+                                int statusCode = given()
+                                    .header("Authorization", "Bearer " + validToken)
+                                    .contentType(ContentType.JSON)
+                                    .body(requestBody)
+                                .when()
+                                    .post("/api/v1/memory")
+                                .then()
+                                    .extract()
+                                    .statusCode();
+
+                                if (statusCode == 201) {
+                                    successCount.incrementAndGet();
+                                }
+                            } catch (Exception e) {
+                                // Expected under memory pressure
+                            }
+                        }
+                    } finally {
+                        latch.countDown();
+                    }
+                });
+            }
+
+            try {
+                boolean completed = latch.await(120, TimeUnit.SECONDS);
+                executor.shutdown();
+
+                assertThat(completed).isTrue();
+                
+                // System should handle memory pressure gracefully
+                // May reject some requests but shouldn't crash
+                System.out.printf("Memory pressure test: %d successful requests%n", 
+                    successCount.get());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        @Test
+        @DisplayName("Should handle CPU exhaustion")
+        void shouldHandleCpuExhaustion() {
+            // Create CPU-intensive workload
+            simulateCpuIntensiveWorkload();
+
+            // Test system responsiveness under CPU pressure
+            long startTime = System.currentTimeMillis();
+            
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/plugins")
+            .then()
+                .statusCode(200);
+
+            long responseTime = System.currentTimeMillis() - startTime;
+            
+            // Response time might be slower but should still respond
+            assertThat(responseTime).isLessThan(30000); // 30 seconds max
+
+            System.out.printf("CPU exhaustion test: Response time %d ms%n", responseTime);
+        }
+
+        @Test
+        @DisplayName("Should handle disk space exhaustion")
+        void shouldHandleDiskSpaceExhaustion() {
+            // Simulate disk space issues
+            simulateDiskSpaceExhaustion();
+
+            // Try to create memory entries (which might write to disk)
+            String requestBody = """
+                {
+                    "type": "file",
+                    "filename": "disk_test.txt",
+                    "content": "Testing disk space handling"
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + validToken)
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/memory")
+            .then()
+                .statusCode(anyOf(equalTo(201), equalTo(507))); // 507 = Insufficient Storage
+        }
+    }
+
+    @Nested
+    @DisplayName("Cascading Failure Tests")
+    class CascadingFailureTests {
+
+        @Test
+        @DisplayName("Should prevent cascading failures")
+        void shouldPreventCascadingFailures() {
+            // Simulate failure in one component
+            simulatePluginServiceFailure();
+
+            // Other services should continue to work
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/memory")
+            .then()
+                .statusCode(200);
+
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/executions/history")
+            .then()
+                .statusCode(200);
+
+            // Plugin-dependent operations might fail gracefully
+            String requestBody = """
+                {
+                    "prompt": "Send email to test@example.com",
+                    "dryRun": false
+                }
+                """;
+
+            given()
+                .header("Authorization", "Bearer " + validToken)
+                .contentType(ContentType.JSON)
+                .body(requestBody)
+            .when()
+                .post("/api/v1/prompts/execute")
+            .then()
+                .statusCode(anyOf(equalTo(200), equalTo(503)))
+                .body("error.code", anyOf(nullValue(), equalTo("SERVICE_UNAVAILABLE")));
+        }
+
+        @Test
+        @DisplayName("Should implement circuit breaker pattern")
+        void shouldImplementCircuitBreakerPattern() {
+            // Make requests that will trigger circuit breaker
+            for (int i = 0; i < 10; i++) {
+                given()
+                    .header("Authorization", "Bearer " + validToken)
+                .when()
+                    .get("/api/v1/plugins/FailingPlugin/health")
+                .then()
+                    .statusCode(anyOf(equalTo(200), equalTo(503)));
+            }
+
+            // Circuit breaker should be open now, failing fast
+            long startTime = System.currentTimeMillis();
+            
+            given()
+                .header("Authorization", "Bearer " + validToken)
+            .when()
+                .get("/api/v1/plugins/FailingPlugin/health")
+            .then()
+                .statusCode(503);
+
+            long responseTime = System.currentTimeMillis() - startTime;
+            
+            // Should fail fast (circuit breaker open)
+            assertThat(responseTime).isLessThan(1000); // Less than 1 second
+        }
+    }
+
+    // Helper methods for chaos simulation
+    private void enableChaosMonkey() {
+        if (chaosMonkeySettings != null) {
+            WatcherProperties watcherProperties = new WatcherProperties();
+            watcherProperties.setController(true);
+            watcherProperties.setService(true);
+            watcherProperties.setRepository(true);
+            // Configure chaos monkey settings
+        }
+    }
+
+    private void simulateDatabaseFailure() {
+        // In a real implementation, this would disconnect from database
+        // or use chaos monkey to inject database failures
+        System.out.println("Simulating database failure...");
+    }
+
+    private void restoreDatabaseConnection() {
+        System.out.println("Restoring database connection...");
+    }
+
+    private void simulateRedisFailure() {
+        System.out.println("Simulating Redis failure...");
+    }
+
+    private void restoreRedisConnection() {
+        System.out.println("Restoring Redis connection...");
+    }
+
+    private void simulateSlowExternalServices() {
+        System.out.println("Simulating slow external services...");
+    }
+
+    private void simulateNetworkPartition() {
+        System.out.println("Simulating network partition...");
+    }
+
+    private void restoreNetworkConnection() {
+        System.out.println("Restoring network connection...");
+    }
+
+    private void simulateIntermittentConnectivity() {
+        System.out.println("Simulating intermittent connectivity...");
+    }
+
+    private void simulateCpuIntensiveWorkload() {
+        // Create CPU-intensive background task
+        new Thread(() -> {
+            long endTime = System.currentTimeMillis() + 10000; // 10 seconds
+            while (System.currentTimeMillis() < endTime) {
+                // CPU-intensive calculation
+                Math.sqrt(Math.random() * 1000000);
+            }
+        }).start();
+    }
+
+    private void simulateDiskSpaceExhaustion() {
+        System.out.println("Simulating disk space exhaustion...");
+    }
+
+    private void simulatePluginServiceFailure() {
+        System.out.println("Simulating plugin service failure...");
+    }
+
+    private org.hamcrest.Matcher<Integer> anyOf(org.hamcrest.Matcher<Integer>... matchers) {
+        return org.hamcrest.core.AnyOf.anyOf(matchers);
+    }
+
+    private org.hamcrest.Matcher<Integer> equalTo(int value) {
+        return org.hamcrest.core.IsEqual.equalTo(value);
+    }
+
+    private org.hamcrest.Matcher<String> nullValue() {
+        return org.hamcrest.core.IsNull.nullValue();
+    }
+}

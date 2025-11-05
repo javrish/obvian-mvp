@@ -1,0 +1,409 @@
+package api.config;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.jvm.JvmGcMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmMemoryMetrics;
+import io.micrometer.core.instrument.binder.jvm.JvmThreadMetrics;
+import io.micrometer.core.instrument.binder.system.ProcessorMetrics;
+import io.micrometer.core.instrument.binder.system.UptimeMetrics;
+import io.micrometer.core.instrument.config.MeterFilter;
+import io.micrometer.prometheus.PrometheusConfig;
+import io.micrometer.prometheus.PrometheusMeterRegistry;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Configuration for comprehensive performance monitoring and metrics collection.
+ * 
+ * This configuration provides:
+ * - Prometheus metrics export for Grafana dashboards
+ * - JVM and system metrics collection
+ * - Custom business metrics for Visual Trace operations
+ * - Performance alerting thresholds
+ * - Metrics filtering and tagging
+ * - Automated performance reporting
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.2
+ */
+@Configuration
+@EnableScheduling
+@ConfigurationProperties(prefix = "obvian.monitoring.performance")
+public class PerformanceMonitoringConfig {
+    
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private MeterRegistry meterRegistry;
+    
+    // Monitoring configuration properties
+    private boolean enabled = true;
+    private Duration metricsRetention = Duration.ofDays(7);
+    private Duration alertingInterval = Duration.ofMinutes(5);
+    private boolean enableJvmMetrics = true;
+    private boolean enableSystemMetrics = true;
+    private boolean enableCustomMetrics = true;
+    
+    // Performance thresholds for alerting
+    private double maxResponseTimeMs = 1000.0;
+    private double maxErrorRatePercent = 5.0;
+    private double maxMemoryUsagePercent = 85.0;
+    private double minCacheHitRatePercent = 75.0;
+    
+    // Metrics collection intervals
+    private Duration metricsCollectionInterval = Duration.ofSeconds(30);
+    private Duration performanceReportInterval = Duration.ofMinutes(15);
+    
+    // Internal state for performance monitoring
+    private final Map<String, PerformanceAlert> activeAlerts = new ConcurrentHashMap<>();
+    private final PerformanceReporter performanceReporter = new PerformanceReporter();
+    
+    /**
+     * Configure Prometheus metrics registry with custom settings.
+     */
+    @Bean
+    public PrometheusMeterRegistry prometheusMeterRegistry() {
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        
+        // Add common tags to all metrics
+        registry.config()
+            .commonTags(
+                "application", "obvian",
+                "service", "visual-trace",
+                "environment", getEnvironment()
+            )
+            // Configure metric filters
+            .meterFilter(MeterFilter.deny(id -> {
+                String name = id.getName();
+                // Filter out noisy metrics
+                return name.startsWith("jvm.classes") || 
+                       name.startsWith("process.files") ||
+                       name.startsWith("logback");
+            }))
+            // Configure distribution summaries for better percentiles
+            .meterFilter(MeterFilter.accept(id -> {
+                // Accept visual trace metrics for monitoring
+                return id.getName().startsWith("visual_trace");
+            }));
+        
+        return registry;
+    }
+    
+    /**
+     * Initialize JVM and system metrics.
+     * Changed to use @PostConstruct to avoid circular dependency
+     */
+    @jakarta.annotation.PostConstruct
+    public void setupMetrics() {
+        if (meterRegistry == null) {
+            return; // MeterRegistry not available, skip setup
+        }
+        
+        // Add JVM metrics if enabled
+        if (enableJvmMetrics) {
+            new JvmMemoryMetrics().bindTo(meterRegistry);
+            new JvmGcMetrics().bindTo(meterRegistry);
+            new JvmThreadMetrics().bindTo(meterRegistry);
+        }
+        
+        // Add system metrics if enabled
+        if (enableSystemMetrics) {
+            new ProcessorMetrics().bindTo(meterRegistry);
+            new UptimeMetrics().bindTo(meterRegistry);
+        }
+        
+        // Add common tags
+        meterRegistry.config().commonTags(
+            "application", "obvian-dag-executor",
+            "environment", "production"
+        );
+    }
+    
+    /**
+     * Custom performance metrics collector for Visual Trace operations.
+     */
+    @Bean
+    public VisualTraceCustomMetrics visualTraceCustomMetrics(MeterRegistry meterRegistry) {
+        return new VisualTraceCustomMetrics(meterRegistry);
+    }
+    
+    /**
+     * Performance alerting service.
+     */
+    @Bean
+    public PerformanceAlertingService performanceAlertingService(
+            MeterRegistry meterRegistry,
+            VisualTraceCustomMetrics customMetrics) {
+        return new PerformanceAlertingService(meterRegistry, customMetrics, this);
+    }
+    
+    /**
+     * Scheduled task to collect and report performance metrics.
+     */
+    @Scheduled(fixedRate = 900000) // 15 minutes = 900000 ms
+    public void reportPerformanceMetrics() {
+        if (!enabled) return;
+        
+        try {
+            performanceReporter.generateReport();
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(PerformanceMonitoringConfig.class)
+                .error("Failed to generate performance report", e);
+        }
+    }
+    
+    /**
+     * Scheduled task to check performance thresholds and trigger alerts.
+     */
+    @Scheduled(fixedRate = 300000) // 5 minutes = 300000 ms
+    public void checkPerformanceAlerts() {
+        if (!enabled) return;
+        
+        // This will be implemented by the PerformanceAlertingService
+        org.slf4j.LoggerFactory.getLogger(PerformanceMonitoringConfig.class)
+            .debug("Performance alerting check executed");
+    }
+    
+    // ===== Custom Metrics Collection =====
+    
+    /**
+     * Custom metrics specific to Visual Trace operations.
+     */
+    public static class VisualTraceCustomMetrics {
+        private final MeterRegistry meterRegistry;
+        private final io.micrometer.core.instrument.Gauge heapUsageGauge;
+        private final io.micrometer.core.instrument.Gauge cacheEfficiencyGauge;
+        private final io.micrometer.core.instrument.Counter businessOperationsCounter;
+        
+        public VisualTraceCustomMetrics(MeterRegistry meterRegistry) {
+            this.meterRegistry = meterRegistry;
+            
+            // Heap usage percentage gauge
+            this.heapUsageGauge = io.micrometer.core.instrument.Gauge.builder("obvian.jvm.heap.usage.ratio", this, 
+                    metrics -> metrics.getHeapUsageRatio())
+                .description("JVM heap usage as a ratio")
+                .register(meterRegistry);
+            
+            // Cache efficiency gauge
+            this.cacheEfficiencyGauge = io.micrometer.core.instrument.Gauge.builder("obvian.cache.efficiency.ratio", this,
+                    metrics -> metrics.getCacheEfficiencyRatio())
+                .description("Overall cache efficiency ratio")
+                .register(meterRegistry);
+            
+            // Business operations counter
+            this.businessOperationsCounter = io.micrometer.core.instrument.Counter.builder("obvian.business.operations.total")
+                .description("Total business operations processed")
+                .register(meterRegistry);
+        }
+        
+        private double getHeapUsageRatio() {
+            Runtime runtime = Runtime.getRuntime();
+            long used = runtime.totalMemory() - runtime.freeMemory();
+            long max = runtime.maxMemory();
+            return max > 0 ? (double) used / max : 0.0;
+        }
+        
+        private double getCacheEfficiencyRatio() {
+            // This would integrate with the VisualTraceService cache statistics
+            // For now, return a placeholder value
+            return 0.85; // 85% efficiency
+        }
+        
+        public void recordBusinessOperation(String operationType) {
+            businessOperationsCounter.increment();
+        }
+    }
+    
+    // ===== Performance Alerting =====
+    
+    /**
+     * Service for monitoring performance thresholds and triggering alerts.
+     */
+    public static class PerformanceAlertingService {
+        private final MeterRegistry meterRegistry;
+        private final VisualTraceCustomMetrics customMetrics;
+        private final PerformanceMonitoringConfig config;
+        private final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(PerformanceAlertingService.class);
+        
+        public PerformanceAlertingService(MeterRegistry meterRegistry, 
+                                        VisualTraceCustomMetrics customMetrics,
+                                        PerformanceMonitoringConfig config) {
+            this.meterRegistry = meterRegistry;
+            this.customMetrics = customMetrics;
+            this.config = config;
+        }
+        
+        public void checkThresholds() {
+            checkResponseTimeThreshold();
+            checkErrorRateThreshold();
+            checkMemoryUsageThreshold();
+            checkCacheHitRateThreshold();
+        }
+        
+        private void checkResponseTimeThreshold() {
+            // Check average response time for visual trace operations
+            io.micrometer.core.instrument.Timer timer = meterRegistry.find("visual_trace.get_data.duration").timer();
+            if (timer != null && timer.count() > 0) {
+                double avgResponseTime = timer.mean(java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (avgResponseTime > config.maxResponseTimeMs) {
+                    triggerAlert("HIGH_RESPONSE_TIME", 
+                        String.format("Average response time %.2fms exceeds threshold %.2fms", 
+                            avgResponseTime, config.maxResponseTimeMs));
+                }
+            }
+        }
+        
+        private void checkErrorRateThreshold() {
+            // Check error rate for visual trace operations
+            io.micrometer.core.instrument.Counter errorCounter = meterRegistry.find("visual_trace.cache.misses").counter();
+            io.micrometer.core.instrument.Counter totalCounter = meterRegistry.find("visual_trace.cache.hits").counter();
+            
+            if (errorCounter != null && totalCounter != null) {
+                double errors = errorCounter.count();
+                double total = totalCounter.count() + errors;
+                if (total > 0) {
+                    double errorRate = (errors / total) * 100;
+                    if (errorRate > config.maxErrorRatePercent) {
+                        triggerAlert("HIGH_ERROR_RATE", 
+                            String.format("Error rate %.2f%% exceeds threshold %.2f%%", 
+                                errorRate, config.maxErrorRatePercent));
+                    }
+                }
+            }
+        }
+        
+        private void checkMemoryUsageThreshold() {
+            double heapUsage = customMetrics.getHeapUsageRatio() * 100;
+            if (heapUsage > config.maxMemoryUsagePercent) {
+                triggerAlert("HIGH_MEMORY_USAGE", 
+                    String.format("Heap usage %.2f%% exceeds threshold %.2f%%", 
+                        heapUsage, config.maxMemoryUsagePercent));
+            }
+        }
+        
+        private void checkCacheHitRateThreshold() {
+            double cacheEfficiency = customMetrics.getCacheEfficiencyRatio() * 100;
+            if (cacheEfficiency < config.minCacheHitRatePercent) {
+                triggerAlert("LOW_CACHE_HIT_RATE", 
+                    String.format("Cache hit rate %.2f%% below threshold %.2f%%", 
+                        cacheEfficiency, config.minCacheHitRatePercent));
+            }
+        }
+        
+        private void triggerAlert(String alertType, String message) {
+            String alertKey = alertType + "_" + System.currentTimeMillis() / (5 * 60 * 1000); // 5-minute windows
+            
+            if (!config.activeAlerts.containsKey(alertKey)) {
+                PerformanceAlert alert = new PerformanceAlert(alertType, message, java.time.Instant.now());
+                config.activeAlerts.put(alertKey, alert);
+                
+                logger.warn("PERFORMANCE ALERT [{}]: {}", alertType, message);
+                
+                // Here you could integrate with external alerting systems
+                // like PagerDuty, Slack, email notifications, etc.
+            }
+        }
+    }
+    
+    // ===== Performance Reporting =====
+    
+    /**
+     * Service for generating periodic performance reports.
+     */
+    public static class PerformanceReporter {
+        private final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(PerformanceReporter.class);
+        
+        public void generateReport() {
+            logger.info("=== Performance Report ===");
+            logger.info("Timestamp: {}", java.time.Instant.now());
+            
+            // Report JVM metrics
+            Runtime runtime = Runtime.getRuntime();
+            long maxMemory = runtime.maxMemory();
+            long totalMemory = runtime.totalMemory();
+            long freeMemory = runtime.freeMemory();
+            long usedMemory = totalMemory - freeMemory;
+            
+            logger.info("Memory - Used: {}MB, Free: {}MB, Total: {}MB, Max: {}MB, Usage: {:.1f}%", 
+                usedMemory / 1024 / 1024, freeMemory / 1024 / 1024, 
+                totalMemory / 1024 / 1024, maxMemory / 1024 / 1024,
+                (double) usedMemory / maxMemory * 100);
+            
+            // Report thread metrics
+            int activeThreads = Thread.activeCount();
+            logger.info("Threads - Active: {}", activeThreads);
+            
+            logger.info("=========================");
+        }
+    }
+    
+    // ===== Data Classes =====
+    
+    public static class PerformanceAlert {
+        private final String type;
+        private final String message;
+        private final java.time.Instant timestamp;
+        
+        public PerformanceAlert(String type, String message, java.time.Instant timestamp) {
+            this.type = type;
+            this.message = message;
+            this.timestamp = timestamp;
+        }
+        
+        public String getType() { return type; }
+        public String getMessage() { return message; }
+        public java.time.Instant getTimestamp() { return timestamp; }
+    }
+    
+    // ===== Helper Methods =====
+    
+    private String getEnvironment() {
+        return System.getProperty("spring.profiles.active", "development");
+    }
+    
+    // ===== Configuration Properties Getters/Setters =====
+    
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    
+    public Duration getMetricsRetention() { return metricsRetention; }
+    public void setMetricsRetention(Duration metricsRetention) { this.metricsRetention = metricsRetention; }
+    
+    public Duration getAlertingInterval() { return alertingInterval; }
+    public void setAlertingInterval(Duration alertingInterval) { this.alertingInterval = alertingInterval; }
+    
+    public boolean isEnableJvmMetrics() { return enableJvmMetrics; }
+    public void setEnableJvmMetrics(boolean enableJvmMetrics) { this.enableJvmMetrics = enableJvmMetrics; }
+    
+    public boolean isEnableSystemMetrics() { return enableSystemMetrics; }
+    public void setEnableSystemMetrics(boolean enableSystemMetrics) { this.enableSystemMetrics = enableSystemMetrics; }
+    
+    public boolean isEnableCustomMetrics() { return enableCustomMetrics; }
+    public void setEnableCustomMetrics(boolean enableCustomMetrics) { this.enableCustomMetrics = enableCustomMetrics; }
+    
+    public double getMaxResponseTimeMs() { return maxResponseTimeMs; }
+    public void setMaxResponseTimeMs(double maxResponseTimeMs) { this.maxResponseTimeMs = maxResponseTimeMs; }
+    
+    public double getMaxErrorRatePercent() { return maxErrorRatePercent; }
+    public void setMaxErrorRatePercent(double maxErrorRatePercent) { this.maxErrorRatePercent = maxErrorRatePercent; }
+    
+    public double getMaxMemoryUsagePercent() { return maxMemoryUsagePercent; }
+    public void setMaxMemoryUsagePercent(double maxMemoryUsagePercent) { this.maxMemoryUsagePercent = maxMemoryUsagePercent; }
+    
+    public double getMinCacheHitRatePercent() { return minCacheHitRatePercent; }
+    public void setMinCacheHitRatePercent(double minCacheHitRatePercent) { this.minCacheHitRatePercent = minCacheHitRatePercent; }
+    
+    public Duration getMetricsCollectionInterval() { return metricsCollectionInterval; }
+    public void setMetricsCollectionInterval(Duration metricsCollectionInterval) { this.metricsCollectionInterval = metricsCollectionInterval; }
+    
+    public Duration getPerformanceReportInterval() { return performanceReportInterval; }
+    public void setPerformanceReportInterval(Duration performanceReportInterval) { this.performanceReportInterval = performanceReportInterval; }
+}

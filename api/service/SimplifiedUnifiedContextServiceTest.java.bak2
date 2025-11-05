@@ -1,0 +1,273 @@
+package tests.api.service;
+
+import api.service.UnifiedContextService;
+import api.service.UnifiedContextServiceImpl;
+import core.ExecutionState;
+import core.InterfaceType;
+import core.StateUpdate;
+import memory.MemoryStore;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Simplified test for UnifiedContextService that works with current interface.
+ * 
+ * This test focuses on the core functionality available in the current
+ * simplified implementation of UnifiedContextService.
+ * 
+ * @author Obvian Labs
+ * @since Phase 26.1c
+ */
+public class SimplifiedUnifiedContextServiceTest {
+    
+    private UnifiedContextService contextService;
+    private MemoryStore memoryStore;
+    
+    @BeforeEach
+    public void setUp() {
+        memoryStore = new MemoryStore();
+        UnifiedContextServiceImpl serviceImpl = new UnifiedContextServiceImpl();
+        serviceImpl.setMemoryStore(memoryStore);
+        this.contextService = serviceImpl;
+    }
+    
+    @Test
+    public void testCreateExecutionState() {
+        // Given
+        String executionId = "test-execution-1";
+        String userId = "test-user";
+        String sessionId = "test-session";
+        InterfaceType interfaceType = InterfaceType.CLI;
+        Map<String, Object> initialContext = Map.of("key1", "value1", "key2", "value2");
+        
+        // When
+        ExecutionState state = contextService.createExecutionState(
+            executionId, userId, sessionId, interfaceType, initialContext
+        );
+        
+        // Then
+        assertNotNull(state);
+        assertEquals(executionId, state.getExecutionId());
+        assertEquals(userId, state.getUserId());
+        assertEquals(sessionId, state.getSessionId());
+        assertEquals(interfaceType, state.getCurrentInterface());
+        assertNotNull(state.getStateId());
+        assertNotNull(state.getCreatedAt());
+        assertNotNull(state.getGlobalContext());
+    }
+    
+    @Test
+    public void testGetExecutionState() {
+        // Given
+        String executionId = "test-execution-2";
+        String userId = "test-user";
+        String sessionId = "test-session";
+        InterfaceType interfaceType = InterfaceType.REST_API;
+        Map<String, Object> initialContext = Map.of("test", "data");
+        
+        ExecutionState createdState = contextService.createExecutionState(
+            executionId, userId, sessionId, interfaceType, initialContext
+        );
+        
+        // When
+        ExecutionState retrievedState = contextService.getExecutionState(createdState.getStateId());
+        
+        // Then
+        assertNotNull(retrievedState);
+        assertEquals(createdState.getStateId(), retrievedState.getStateId());
+        assertEquals(createdState.getExecutionId(), retrievedState.getExecutionId());
+        assertEquals(createdState.getUserId(), retrievedState.getUserId());
+    }
+    
+    @Test
+    public void testGetNonExistentExecutionState() {
+        // When
+        ExecutionState state = contextService.getExecutionState("non-existent-id");
+        
+        // Then
+        assertNull(state);
+    }
+    
+    @Test
+    public void testUpdateExecutionState() throws Exception {
+        // Given
+        String executionId = "test-execution-3";
+        String userId = "test-user";
+        String sessionId = "test-session";
+        InterfaceType interfaceType = InterfaceType.CLI;
+        Map<String, Object> initialContext = Map.of("initial", "value");
+        
+        ExecutionState state = contextService.createExecutionState(
+            executionId, userId, sessionId, interfaceType, initialContext
+        );
+        
+        Map<String, Object> updateData = Map.of("updated", "value", "new", "data");
+        StateUpdate update = new StateUpdate.Builder()
+            .stateId(state.getStateId())
+            .userId(userId)
+            .sourceInterface(InterfaceType.CLI)
+            .updateType(StateUpdate.UpdateType.UPDATE)
+            .updateScope(StateUpdate.UpdateScope.GLOBAL_CONTEXT)
+            .deltaChanges(updateData)
+            .build();
+        
+        // When
+        CompletableFuture<Boolean> result = contextService.updateExecutionState(state.getStateId(), update);
+        Boolean success = result.get();
+        
+        // Then
+        assertTrue(success);
+        
+        // Verify the state was updated
+        ExecutionState updatedState = contextService.getExecutionState(state.getStateId());
+        assertNotNull(updatedState);
+        // Note: The exact update behavior depends on implementation details
+    }
+    
+    @Test
+    public void testRemoveExecutionState() {
+        // Given
+        String executionId = "test-execution-4";
+        String userId = "test-user";
+        String sessionId = "test-session";
+        InterfaceType interfaceType = InterfaceType.REST_API;
+        Map<String, Object> initialContext = Map.of("test", "data");
+        
+        ExecutionState state = contextService.createExecutionState(
+            executionId, userId, sessionId, interfaceType, initialContext
+        );
+        
+        // When
+        boolean removed = contextService.removeExecutionState(state.getStateId());
+        
+        // Then
+        assertTrue(removed);
+        
+        // Verify the state is no longer retrievable
+        ExecutionState retrievedState = contextService.getExecutionState(state.getStateId());
+        assertNull(retrievedState);
+    }
+    
+    @Test
+    public void testRemoveNonExistentExecutionState() {
+        // When
+        boolean removed = contextService.removeExecutionState("non-existent-id");
+        
+        // Then
+        assertFalse(removed);
+    }
+    
+    @Test
+    public void testGetUserExecutionStates() {
+        // Given
+        String userId = "test-user";
+        String otherUserId = "other-user";
+        
+        // Create multiple states for the user
+        ExecutionState state1 = contextService.createExecutionState(
+            "exec-1", userId, "session-1", InterfaceType.CLI, Map.of("data", "1")
+        );
+        ExecutionState state2 = contextService.createExecutionState(
+            "exec-2", userId, "session-2", InterfaceType.REST_API, Map.of("data", "2")
+        );
+        
+        // Create a state for another user
+        ExecutionState otherState = contextService.createExecutionState(
+            "exec-other", otherUserId, "session-other", InterfaceType.CLI, Map.of("data", "other")
+        );
+        
+        // When
+        List<ExecutionState> userStates = contextService.getUserExecutionStates(userId);
+        
+        // Then
+        assertNotNull(userStates);
+        assertEquals(2, userStates.size());
+        
+        // Verify all states belong to the user
+        for (ExecutionState state : userStates) {
+            assertEquals(userId, state.getUserId());
+        }
+    }
+    
+    @Test
+    public void testSynchronizeState() throws Exception {
+        // Given
+        String executionId = "test-execution-sync";
+        String userId = "test-user";
+        String sessionId = "test-session";
+        InterfaceType interfaceType = InterfaceType.REST_API;
+        Map<String, Object> initialContext = Map.of("sync", "test");
+        
+        ExecutionState state = contextService.createExecutionState(
+            executionId, userId, sessionId, interfaceType, initialContext
+        );
+        
+        // When
+        CompletableFuture<Boolean> result = contextService.synchronizeState(state.getStateId());
+        Boolean success = result.get();
+        
+        // Then
+        assertTrue(success);
+    }
+    
+    @Test
+    public void testGetStatistics() {
+        // When
+        Map<String, Object> stats = contextService.getStatistics();
+        
+        // Then
+        assertNotNull(stats);
+        // The exact content depends on implementation, but should not be null
+    }
+    
+    @Test
+    public void testGetHealthStatus() {
+        // When
+        Map<String, Object> health = contextService.getHealthStatus();
+        
+        // Then
+        assertNotNull(health);
+        // The exact content depends on implementation, but should not be null
+    }
+    
+    @Test
+    public void testMultipleInterfaceTypes() {
+        // Given
+        String userId = "test-user";
+        
+        // Create states with different interface types
+        ExecutionState cliState = contextService.createExecutionState(
+            "cli-exec", userId, "cli-session", InterfaceType.CLI, Map.of("type", "cli")
+        );
+        ExecutionState apiState = contextService.createExecutionState(
+            "api-exec", userId, "api-session", InterfaceType.REST_API, Map.of("type", "api")
+        );
+        ExecutionState webState = contextService.createExecutionState(
+            "web-exec", userId, "web-session", InterfaceType.WEB_UI, Map.of("type", "web")
+        );
+        
+        // When
+        List<ExecutionState> userStates = contextService.getUserExecutionStates(userId);
+        
+        // Then
+        assertEquals(3, userStates.size());
+        
+        // Verify different interface types are supported
+        Set<InterfaceType> interfaceTypes = userStates.stream()
+            .map(ExecutionState::getCurrentInterface)
+            .collect(java.util.stream.Collectors.toSet());
+        
+        assertTrue(interfaceTypes.contains(InterfaceType.CLI));
+        assertTrue(interfaceTypes.contains(InterfaceType.REST_API));
+        assertTrue(interfaceTypes.contains(InterfaceType.WEB_UI));
+    }
+}

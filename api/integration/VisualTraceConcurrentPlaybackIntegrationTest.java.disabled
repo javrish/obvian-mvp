@@ -1,0 +1,743 @@
+package api.integration;
+
+import api.ObvianApiApplication;
+import api.config.BaseSpringIntegrationTest;
+import api.service.VisualTraceService;
+import core.*;
+import core.explainability.*;
+import memory.MemoryStore;
+import org.junit.jupiter.api.*;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+
+import static org.assertj.core.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+/**
+ * Comprehensive integration tests for concurrent playback sessions in Visual Trace Logging system.
+ * 
+ * Tests concurrent playback functionality including:
+ * - Multiple simultaneous playback sessions
+ * - Concurrent playback control operations
+ * - Session isolation and state management
+ * - Performance under concurrent playback load
+ * - Breakpoint management across concurrent sessions
+ * - Event streaming with multiple active playbacks
+ * - Resource cleanup and session lifecycle
+ * - Thread safety and synchronization
+ * 
+ * Concurrent Playback Scenarios:
+ * - Multiple users playing different traces simultaneously
+ * - Single user with multiple playback sessions
+ * - Mixed playback speeds and control operations
+ * - Concurrent breakpoint management
+ * - High-frequency playback control changes
+ * - Resource contention and performance impact
+ * 
+ * Test Categories:
+ * - Basic concurrent playback operations
+ * - Session isolation and state consistency
+ * - Performance under concurrent load
+ * - Breakpoint management concurrency
+ * - Event streaming with multiple sessions
+ * - Error handling in concurrent scenarios
+ * - Resource cleanup and leak prevention
+ */
+@SpringBootTest(
+    classes = {ObvianApiApplication.class},
+    webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT
+)
+@ActiveProfiles("integration-test")
+@TestPropertySource(properties = {
+    "spring.main.allow-bean-definition-overriding=true",
+    "logging.level.api.service=DEBUG",
+    "obvian.playback.concurrent-sessions.enabled=true",
+    "obvian.playback.max-concurrent-sessions=20",
+    "obvian.playback.session-timeout=300000", // 5 minutes
+    "obvian.threading.playback-pool-size=10"
+})
+@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+class VisualTraceConcurrentPlaybackIntegrationTest extends BaseSpringIntegrationTest {
+
+    @Autowired
+    private DagExecutor dagExecutor;
+
+    @Autowired
+    private VisualTraceService visualTraceService;
+
+    @Autowired
+    private InteractiveTracePlayer tracePlayer;
+
+    @Autowired
+    private ExplainabilityService explainabilityService;
+
+    @Autowired
+    private MemoryStore memoryStore;
+
+    private ExecutorService executorService;
+    private List<String> testExecutionIds;
+    private Map<String, ExecutionTrace> testTraces;
+
+    @BeforeEach
+    @Override
+    protected void setUp() {
+        super.setUp();
+        executorService = Executors.newFixedThreadPool(20);
+        testExecutionIds = new ArrayList<>();
+        testTraces = new ConcurrentHashMap<>();
+        
+        // Prepare test data - execute multiple DAGs for concurrent playback testing
+        prepareTestExecutions(5);
+        
+        memoryStore.clearMemory();
+    }
+
+    @AfterEach
+    @Override
+    protected void tearDown() {
+        super.tearDown();
+        
+        // Stop all active playback sessions
+        for (String executionId : testExecutionIds) {
+            try {
+                visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STOP);
+            } catch (Exception e) {
+                // Best effort cleanup
+            }
+        }
+        
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        
+        memoryStore.clearMemory();
+    }
+
+    // ===== Basic Concurrent Playback Operations Tests =====
+
+    @Test
+    @Order(1)
+    @DisplayName("Concurrent Playback: Multiple simultaneous playback sessions")
+    void testMultipleSimultaneousPlaybackSessions() throws Exception {
+        // Given - Multiple execution traces available
+        int concurrentSessions = Math.min(5, testExecutionIds.size());
+        List<String> selectedExecutions = testExecutionIds.subList(0, concurrentSessions);
+        
+        CountDownLatch startLatch = new CountDownLatch(concurrentSessions);
+        CountDownLatch completionLatch = new CountDownLatch(concurrentSessions);
+        List<Exception> exceptions = new CopyOnWriteArrayList<>();
+        Map<String, VisualTraceService.PlaybackSessionState> sessionStates = new ConcurrentHashMap<>();
+        
+        // When - Start multiple playback sessions concurrently
+        for (String executionId : selectedExecutions) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    startLatch.countDown();
+                    startLatch.await(5, TimeUnit.SECONDS); // Wait for all to be ready
+                    
+                    // Start playback
+                    CompletableFuture<Void> playbackFuture = visualTraceService.controlPlayback(
+                        executionId, VisualTraceService.PlaybackCommand.PLAY);
+                    
+                    // Get playback state
+                    VisualTraceService.PlaybackSessionState state = 
+                        visualTraceService.getPlaybackState(executionId);
+                    sessionStates.put(executionId, state);
+                    
+                    // Let it play for a bit
+                    Thread.sleep(100);
+                    
+                    // Pause playback
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PAUSE);
+                    
+                    // Verify state
+                    VisualTraceService.PlaybackSessionState pausedState = 
+                        visualTraceService.getPlaybackState(executionId);
+                    assertThat(pausedState.getExecutionId()).isEqualTo(executionId);
+                    
+                } catch (Exception e) {
+                    exceptions.add(e);
+                } finally {
+                    completionLatch.countDown();
+                }
+            }, executorService);
+        }
+        
+        // Then - Verify all sessions operate correctly
+        assertTrue(completionLatch.await(15, TimeUnit.SECONDS), 
+            "All concurrent playback sessions should complete");
+        
+        assertThat(exceptions).isEmpty();
+        assertThat(sessionStates).hasSize(concurrentSessions);
+        
+        // Verify each session maintained independent state
+        for (String executionId : selectedExecutions) {
+            VisualTraceService.PlaybackSessionState state = sessionStates.get(executionId);
+            assertThat(state).isNotNull();
+            assertThat(state.getExecutionId()).isEqualTo(executionId);
+            
+            // Verify final state after pause
+            VisualTraceService.PlaybackSessionState finalState = 
+                visualTraceService.getPlaybackState(executionId);
+            assertThat(finalState.getStatus()).isIn(
+                InteractiveTracePlayer.PlaybackStatus.PAUSED,
+                InteractiveTracePlayer.PlaybackStatus.STOPPED
+            );
+        }
+        
+        System.out.println("✓ Successfully managed " + concurrentSessions + " concurrent playback sessions");
+        System.out.println("✓ All sessions maintained independent state");
+    }
+
+    @Test
+    @Order(2)
+    @DisplayName("Concurrent Playback: Session isolation and state consistency")
+    void testSessionIsolationAndStateConsistency() throws Exception {
+        // Given - Multiple execution IDs for isolation testing
+        String execution1 = testExecutionIds.get(0);
+        String execution2 = testExecutionIds.get(1);
+        String execution3 = testExecutionIds.get(2);
+        
+        // When - Perform different operations on each session concurrently
+        CompletableFuture<Void> session1Future = CompletableFuture.runAsync(() -> {
+            try {
+                // Session 1: Play at normal speed
+                visualTraceService.controlPlayback(execution1, VisualTraceService.PlaybackCommand.PLAY);
+                Thread.sleep(50);
+                visualTraceService.controlPlayback(execution1, VisualTraceService.PlaybackCommand.SET_SPEED, 1.0);
+                Thread.sleep(50);
+                visualTraceService.controlPlayback(execution1, VisualTraceService.PlaybackCommand.PAUSE);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, executorService);
+        
+        CompletableFuture<Void> session2Future = CompletableFuture.runAsync(() -> {
+            try {
+                // Session 2: Play at double speed with stepping
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.PLAY);
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.SET_SPEED, 2.0);
+                Thread.sleep(30);
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.STEP_FORWARD);
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.STEP_FORWARD);
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.STOP);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, executorService);
+        
+        CompletableFuture<Void> session3Future = CompletableFuture.runAsync(() -> {
+            try {
+                // Session 3: Breakpoint management and stepping
+                visualTraceService.manageBreakpoints(execution3, VisualTraceService.BreakpointOperation.ADD, 
+                    Set.of("test-node-1", "test-node-2"));
+                visualTraceService.controlPlayback(execution3, VisualTraceService.PlaybackCommand.PLAY);
+                Thread.sleep(40);
+                visualTraceService.controlPlayback(execution3, VisualTraceService.PlaybackCommand.STEP_BACKWARD);
+                visualTraceService.manageBreakpoints(execution3, VisualTraceService.BreakpointOperation.CLEAR, 
+                    Collections.emptySet());
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }, executorService);
+        
+        // Wait for all sessions to complete
+        CompletableFuture.allOf(session1Future, session2Future, session3Future).get(10, TimeUnit.SECONDS);
+        
+        // Then - Verify each session maintained its own state
+        VisualTraceService.PlaybackSessionState state1 = visualTraceService.getPlaybackState(execution1);
+        VisualTraceService.PlaybackSessionState state2 = visualTraceService.getPlaybackState(execution2);
+        VisualTraceService.PlaybackSessionState state3 = visualTraceService.getPlaybackState(execution3);
+        
+        // Verify session isolation
+        assertThat(state1.getExecutionId()).isEqualTo(execution1);
+        assertThat(state2.getExecutionId()).isEqualTo(execution2);
+        assertThat(state3.getExecutionId()).isEqualTo(execution3);
+        
+        // Verify different states based on operations performed
+        assertThat(state1.getStatus()).isEqualTo(InteractiveTracePlayer.PlaybackStatus.PAUSED);
+        assertThat(state2.getStatus()).isEqualTo(InteractiveTracePlayer.PlaybackStatus.STOPPED);
+        
+        // Verify playback speeds were maintained independently
+        assertThat(state1.getPlaybackSpeed()).isEqualTo(1.0);
+        assertThat(state2.getPlaybackSpeed()).isEqualTo(2.0);
+        
+        // Verify breakpoints were managed independently
+        VisualTraceService.BreakpointResult breakpointResult1 = visualTraceService.manageBreakpoints(
+            execution1, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+        VisualTraceService.BreakpointResult breakpointResult3 = visualTraceService.manageBreakpoints(
+            execution3, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+        
+        assertThat(breakpointResult1.getCurrentBreakpoints()).isEmpty(); // No breakpoints set for session 1
+        assertThat(breakpointResult3.getCurrentBreakpoints()).isEmpty(); // Cleared in session 3
+        
+        System.out.println("✓ Session isolation verified across 3 concurrent sessions");
+        System.out.println("✓ Independent state management confirmed");
+    }
+
+    @Test
+    @Order(3)
+    @DisplayName("Concurrent Playback: Performance under concurrent load")
+    void testPerformanceUnderConcurrentLoad() throws Exception {
+        // Given - High concurrent load scenario
+        int highConcurrency = Math.min(10, testExecutionIds.size() * 2); // Reuse executions
+        List<String> executionsForLoad = new ArrayList<>();
+        for (int i = 0; i < highConcurrency; i++) {
+            executionsForLoad.add(testExecutionIds.get(i % testExecutionIds.size()));
+        }
+        
+        AtomicInteger successfulOperations = new AtomicInteger(0);
+        AtomicInteger failedOperations = new AtomicInteger(0);
+        List<Long> operationTimes = new CopyOnWriteArrayList<>();
+        CountDownLatch loadTestLatch = new CountDownLatch(highConcurrency);
+        
+        long loadTestStartTime = System.currentTimeMillis();
+        
+        // When - Apply high concurrent load
+        Set<CompletableFuture<Void>> futures = new HashSet<>();
+        for (int i = 0; i < highConcurrency; i++) {
+            final int index = i;
+            final String executionId = executionsForLoad.get(index);
+            
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                try {
+                    long operationStart = System.currentTimeMillis();
+                    
+                    // Mix of playback operations
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PLAY);
+                    Thread.sleep(10 + (index % 20)); // Variable delay
+                    
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.SET_SPEED, 
+                        1.0 + (index % 3)); // Different speeds
+                    Thread.sleep(5);
+                    
+                    if (index % 3 == 0) {
+                        visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STEP_FORWARD);
+                    } else if (index % 3 == 1) {
+                        visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PAUSE);
+                    } else {
+                        visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STOP);
+                    }
+                    
+                    long operationTime = System.currentTimeMillis() - operationStart;
+                    operationTimes.add(operationTime);
+                    successfulOperations.incrementAndGet();
+                    
+                } catch (Exception e) {
+                    failedOperations.incrementAndGet();
+                    System.err.println("Concurrent operation failed: " + e.getMessage());
+                } finally {
+                    loadTestLatch.countDown();
+                }
+            }, executorService);
+            
+            futures.add(future);
+        }
+        
+        // Wait for load test completion
+        assertTrue(loadTestLatch.await(30, TimeUnit.SECONDS), "Load test should complete within timeout");
+        long loadTestTotalTime = System.currentTimeMillis() - loadTestStartTime;
+        
+        // Then - Verify performance under load
+        assertThat(successfulOperations.get()).isGreaterThan(highConcurrency * 0.9); // At least 90% success rate
+        assertThat(failedOperations.get()).isLessThan(highConcurrency * 0.1); // Less than 10% failures
+        
+        // Calculate performance metrics
+        double avgOperationTime = operationTimes.stream().mapToLong(Long::longValue).average().orElse(0.0);
+        long maxOperationTime = operationTimes.stream().mapToLong(Long::longValue).max().orElse(0L);
+        
+        assertThat(avgOperationTime).as("Average operation time should be reasonable under load").isLessThan(1000); // 1 second
+        assertThat(maxOperationTime).as("Max operation time should be bounded").isLessThan(5000); // 5 seconds
+        assertThat(loadTestTotalTime).as("Total load test time should be reasonable").isLessThan(30000); // 30 seconds
+        
+        // Verify system stability after load test
+        for (String executionId : testExecutionIds) {
+            VisualTraceService.PlaybackSessionState state = visualTraceService.getPlaybackState(executionId);
+            assertThat(state).isNotNull();
+            assertThat(state.getExecutionId()).isEqualTo(executionId);
+        }
+        
+        System.out.println("✓ Concurrent load test results:");
+        System.out.println("  - Concurrent operations: " + highConcurrency);
+        System.out.println("  - Successful: " + successfulOperations.get());
+        System.out.println("  - Failed: " + failedOperations.get());
+        System.out.println("  - Avg operation time: " + String.format("%.1f", avgOperationTime) + "ms");
+        System.out.println("  - Max operation time: " + maxOperationTime + "ms");
+        System.out.println("  - Total test time: " + loadTestTotalTime + "ms");
+    }
+
+    // ===== Breakpoint Management Concurrency Tests =====
+
+    @Test
+    @Order(4)
+    @DisplayName("Concurrent Playback: Breakpoint management across concurrent sessions")
+    void testBreakpointManagementAcrossConcurrentSessions() throws Exception {
+        // Given - Multiple sessions with different breakpoint scenarios
+        String execution1 = testExecutionIds.get(0);
+        String execution2 = testExecutionIds.get(1);
+        String execution3 = testExecutionIds.get(2);
+        
+        Set<String> breakpoints1 = Set.of("test-node-0", "test-node-2", "test-node-4");
+        Set<String> breakpoints2 = Set.of("test-node-1", "test-node-3", "test-node-5");
+        Set<String> breakpoints3 = Set.of("test-node-0", "test-node-1", "test-node-6");
+        
+        CountDownLatch breakpointLatch = new CountDownLatch(3);
+        Map<String, VisualTraceService.BreakpointResult> breakpointResults = new ConcurrentHashMap<>();
+        List<Exception> breakpointExceptions = new CopyOnWriteArrayList<>();
+        
+        // When - Manage breakpoints concurrently across sessions
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Session 1: Add breakpoints, play, then remove some
+                VisualTraceService.BreakpointResult addResult = visualTraceService.manageBreakpoints(
+                    execution1, VisualTraceService.BreakpointOperation.ADD, breakpoints1);
+                breakpointResults.put(execution1 + "_add", addResult);
+                
+                visualTraceService.controlPlayback(execution1, VisualTraceService.PlaybackCommand.PLAY);
+                Thread.sleep(50);
+                
+                VisualTraceService.BreakpointResult removeResult = visualTraceService.manageBreakpoints(
+                    execution1, VisualTraceService.BreakpointOperation.REMOVE, Set.of("test-node-0"));
+                breakpointResults.put(execution1 + "_remove", removeResult);
+                
+            } catch (Exception e) {
+                breakpointExceptions.add(e);
+            } finally {
+                breakpointLatch.countDown();
+            }
+        }, executorService);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Session 2: Add different breakpoints, step through execution
+                visualTraceService.manageBreakpoints(execution2, VisualTraceService.BreakpointOperation.ADD, breakpoints2);
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.PLAY);
+                Thread.sleep(30);
+                visualTraceService.controlPlayback(execution2, VisualTraceService.PlaybackCommand.STEP_FORWARD);
+                
+                VisualTraceService.BreakpointResult listResult = visualTraceService.manageBreakpoints(
+                    execution2, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+                breakpointResults.put(execution2 + "_list", listResult);
+                
+            } catch (Exception e) {
+                breakpointExceptions.add(e);
+            } finally {
+                breakpointLatch.countDown();
+            }
+        }, executorService);
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Session 3: Add breakpoints, clear all, then add new ones
+                visualTraceService.manageBreakpoints(execution3, VisualTraceService.BreakpointOperation.ADD, breakpoints3);
+                Thread.sleep(20);
+                
+                VisualTraceService.BreakpointResult clearResult = visualTraceService.manageBreakpoints(
+                    execution3, VisualTraceService.BreakpointOperation.CLEAR, Collections.emptySet());
+                breakpointResults.put(execution3 + "_clear", clearResult);
+                
+                visualTraceService.manageBreakpoints(execution3, VisualTraceService.BreakpointOperation.ADD, 
+                    Set.of("test-node-7", "test-node-8"));
+                
+            } catch (Exception e) {
+                breakpointExceptions.add(e);
+            } finally {
+                breakpointLatch.countDown();
+            }
+        }, executorService);
+        
+        // Wait for all breakpoint operations to complete
+        assertTrue(breakpointLatch.await(10, TimeUnit.SECONDS), "Breakpoint operations should complete");
+        
+        // Then - Verify breakpoint operations succeeded and maintained isolation
+        assertThat(breakpointExceptions).isEmpty();
+        
+        // Verify session 1 breakpoint operations
+        VisualTraceService.BreakpointResult addResult1 = breakpointResults.get(execution1 + "_add");
+        assertThat(addResult1.isSuccess()).isTrue();
+        assertThat(addResult1.getAffectedBreakpoints()).containsExactlyInAnyOrderElementsOf(breakpoints1);
+        
+        VisualTraceService.BreakpointResult removeResult1 = breakpointResults.get(execution1 + "_remove");
+        assertThat(removeResult1.isSuccess()).isTrue();
+        assertThat(removeResult1.getAffectedBreakpoints()).contains("test-node-0");
+        
+        // Verify session 2 breakpoint list
+        VisualTraceService.BreakpointResult listResult2 = breakpointResults.get(execution2 + "_list");
+        assertThat(listResult2.isSuccess()).isTrue();
+        assertThat(listResult2.getCurrentBreakpoints()).containsExactlyInAnyOrderElementsOf(breakpoints2);
+        
+        // Verify session 3 clear operation
+        VisualTraceService.BreakpointResult clearResult3 = breakpointResults.get(execution3 + "_clear");
+        assertThat(clearResult3.isSuccess()).isTrue();
+        
+        // Verify final states are independent
+        VisualTraceService.BreakpointResult finalState1 = visualTraceService.manageBreakpoints(
+            execution1, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+        VisualTraceService.BreakpointResult finalState2 = visualTraceService.manageBreakpoints(
+            execution2, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+        VisualTraceService.BreakpointResult finalState3 = visualTraceService.manageBreakpoints(
+            execution3, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+        
+        // Session 1 should have breakpoints1 minus "test-node-0"
+        Set<String> expectedBreakpoints1 = new HashSet<>(breakpoints1);
+        expectedBreakpoints1.remove("test-node-0");
+        assertThat(finalState1.getCurrentBreakpoints()).containsExactlyInAnyOrderElementsOf(expectedBreakpoints1);
+        
+        // Session 2 should have all its original breakpoints
+        assertThat(finalState2.getCurrentBreakpoints()).containsExactlyInAnyOrderElementsOf(breakpoints2);
+        
+        // Session 3 should have the new breakpoints after clear
+        assertThat(finalState3.getCurrentBreakpoints()).containsExactlyInAnyOrder("test-node-7", "test-node-8");
+        
+        System.out.println("✓ Concurrent breakpoint management verified across 3 sessions");
+        System.out.println("✓ Session isolation maintained for breakpoints");
+    }
+
+    // ===== Event Streaming with Multiple Sessions Tests =====
+
+    @Test
+    @Order(5)
+    @DisplayName("Concurrent Playback: Event streaming with multiple active sessions")
+    void testEventStreamingWithMultipleActiveSessions() throws Exception {
+        // Given - Multiple executions for streaming
+        List<String> streamingExecutions = testExecutionIds.subList(0, 3);
+        Map<String, VisualTraceService.EventStream> activeStreams = new ConcurrentHashMap<>();
+        CountDownLatch streamSetupLatch = new CountDownLatch(streamingExecutions.size());
+        
+        // When - Set up event streams for multiple executions concurrently
+        for (String executionId : streamingExecutions) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    VisualTraceService.EventStream stream = visualTraceService.streamEvents(executionId);
+                    activeStreams.put(executionId, stream);
+                    
+                    // Start playback to generate events
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PLAY);
+                    Thread.sleep(50);
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PAUSE);
+                    
+                } catch (Exception e) {
+                    System.err.println("Stream setup failed for " + executionId + ": " + e.getMessage());
+                } finally {
+                    streamSetupLatch.countDown();
+                }
+            }, executorService);
+        }
+        
+        // Wait for stream setup
+        assertTrue(streamSetupLatch.await(10, TimeUnit.SECONDS), "Event streams should be set up");
+        
+        // Then - Verify all streams are active and independent
+        assertThat(activeStreams).hasSize(streamingExecutions.size());
+        
+        for (String executionId : streamingExecutions) {
+            VisualTraceService.EventStream stream = activeStreams.get(executionId);
+            assertThat(stream).isNotNull();
+            assertThat(stream.getExecutionId()).isEqualTo(executionId);
+            assertThat(stream.isActive()).isTrue();
+            assertThat(stream.getStreamId()).isNotBlank();
+            
+            // Verify each stream has unique ID
+            for (String otherExecutionId : streamingExecutions) {
+                if (!otherExecutionId.equals(executionId)) {
+                    VisualTraceService.EventStream otherStream = activeStreams.get(otherExecutionId);
+                    assertThat(stream.getStreamId()).isNotEqualTo(otherStream.getStreamId());
+                }
+            }
+        }
+        
+        // Test concurrent stream operations
+        CountDownLatch streamOpsLatch = new CountDownLatch(streamingExecutions.size());
+        AtomicInteger streamOperationSuccesses = new AtomicInteger(0);
+        
+        for (String executionId : streamingExecutions) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    // Perform various playback operations to generate stream events
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PLAY);
+                    Thread.sleep(30);
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STEP_FORWARD);
+                    Thread.sleep(20);
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STOP);
+                    
+                    streamOperationSuccesses.incrementAndGet();
+                } catch (Exception e) {
+                    System.err.println("Stream operation failed for " + executionId + ": " + e.getMessage());
+                } finally {
+                    streamOpsLatch.countDown();
+                }
+            }, executorService);
+        }
+        
+        assertTrue(streamOpsLatch.await(10, TimeUnit.SECONDS), "Stream operations should complete");
+        assertThat(streamOperationSuccesses.get()).isEqualTo(streamingExecutions.size());
+        
+        // Stop all streams
+        for (String executionId : streamingExecutions) {
+            visualTraceService.stopEventStream(executionId);
+            VisualTraceService.EventStream stream = activeStreams.get(executionId);
+            assertThat(stream.isActive()).isFalse();
+        }
+        
+        System.out.println("✓ Concurrent event streaming verified for " + streamingExecutions.size() + " sessions");
+        System.out.println("✓ Stream isolation and independent operation confirmed");
+    }
+
+    // ===== Resource Cleanup and Lifecycle Tests =====
+
+    @Test
+    @Order(6)
+    @DisplayName("Concurrent Playback: Resource cleanup and session lifecycle")
+    void testResourceCleanupAndSessionLifecycle() throws Exception {
+        // Given - Create sessions that will be explicitly cleaned up
+        List<String> cleanupTestExecutions = testExecutionIds.subList(0, 4);
+        Map<String, VisualTraceService.PlaybackSessionState> initialStates = new ConcurrentHashMap<>();
+        
+        // Start multiple sessions
+        for (String executionId : cleanupTestExecutions) {
+            visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PLAY);
+            visualTraceService.manageBreakpoints(executionId, VisualTraceService.BreakpointOperation.ADD,
+                Set.of("test-node-1", "test-node-2"));
+            VisualTraceService.EventStream stream = visualTraceService.streamEvents(executionId);
+            
+            VisualTraceService.PlaybackSessionState state = visualTraceService.getPlaybackState(executionId);
+            initialStates.put(executionId, state);
+            
+            assertThat(state.getStatus()).isNotEqualTo(InteractiveTracePlayer.PlaybackStatus.STOPPED);
+            assertThat(stream.isActive()).isTrue();
+        }
+        
+        // When - Stop sessions concurrently
+        CountDownLatch cleanupLatch = new CountDownLatch(cleanupTestExecutions.size());
+        AtomicInteger cleanupSuccesses = new AtomicInteger(0);
+        
+        for (String executionId : cleanupTestExecutions) {
+            CompletableFuture.runAsync(() -> {
+                try {
+                    // Stop playback
+                    visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STOP);
+                    
+                    // Clear breakpoints
+                    visualTraceService.manageBreakpoints(executionId, VisualTraceService.BreakpointOperation.CLEAR,
+                        Collections.emptySet());
+                    
+                    // Stop event stream
+                    visualTraceService.stopEventStream(executionId);
+                    
+                    cleanupSuccesses.incrementAndGet();
+                } catch (Exception e) {
+                    System.err.println("Cleanup failed for " + executionId + ": " + e.getMessage());
+                } finally {
+                    cleanupLatch.countDown();
+                }
+            }, executorService);
+        }
+        
+        // Wait for cleanup completion
+        assertTrue(cleanupLatch.await(10, TimeUnit.SECONDS), "Cleanup should complete");
+        assertThat(cleanupSuccesses.get()).isEqualTo(cleanupTestExecutions.size());
+        
+        // Then - Verify proper cleanup
+        for (String executionId : cleanupTestExecutions) {
+            // Verify playback stopped
+            VisualTraceService.PlaybackSessionState finalState = visualTraceService.getPlaybackState(executionId);
+            assertThat(finalState.getStatus()).isEqualTo(InteractiveTracePlayer.PlaybackStatus.STOPPED);
+            
+            // Verify breakpoints cleared
+            VisualTraceService.BreakpointResult breakpointResult = visualTraceService.manageBreakpoints(
+                executionId, VisualTraceService.BreakpointOperation.LIST, Collections.emptySet());
+            assertThat(breakpointResult.getCurrentBreakpoints()).isEmpty();
+            
+            // Verify can restart session after cleanup
+            visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.PLAY);
+            VisualTraceService.PlaybackSessionState restartedState = visualTraceService.getPlaybackState(executionId);
+            assertThat(restartedState.getStatus()).isNotEqualTo(InteractiveTracePlayer.PlaybackStatus.STOPPED);
+            
+            // Clean up again
+            visualTraceService.controlPlayback(executionId, VisualTraceService.PlaybackCommand.STOP);
+        }
+        
+        System.out.println("✓ Resource cleanup verified for " + cleanupTestExecutions.size() + " sessions");
+        System.out.println("✓ Session lifecycle management confirmed");
+    }
+
+    // ===== Helper Methods =====
+
+    private void prepareTestExecutions(int count) {
+        for (int i = 0; i < count; i++) {
+            try {
+                String executionId = "concurrent-test-exec-" + i + "-" + System.currentTimeMillis();
+                List<TaskNode> nodes = createTestNodes(10); // Reasonable size for testing
+                Dag dag = createTestDAG(nodes, "concurrent-dag-" + i);
+                
+                ExecutionContext context = new ExecutionContext();
+                context.setExecutionId(executionId);
+                context.setUserId("concurrent-test-user-" + i);
+                
+                // Execute DAG to have trace data available
+                DagExecutionResult result = dagExecutor.executeDag(dag, context);
+                assertThat(result.getExecutionStatus()).isEqualTo(DagExecutionResult.ExecutionStatus.COMPLETED);
+                
+                // Get and store the execution trace
+                ExecutionTrace trace = explainabilityService.getExecutionTrace(executionId);
+                assertThat(trace).isNotNull();
+                
+                testExecutionIds.add(executionId);
+                testTraces.put(executionId, trace);
+                
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to prepare test execution " + i, e);
+            }
+        }
+        
+        System.out.println("Prepared " + testExecutionIds.size() + " test executions for concurrent playback testing");
+    }
+
+    private List<TaskNode> createTestNodes(int count) {
+        return IntStream.range(0, count)
+            .mapToObj(i -> {
+                TaskNode node = new TaskNode("test-node-" + i, "test-action-" + i);
+                node.setInputParams(Map.of("index", i, "concurrentTest", true));
+                if (i > 0) {
+                    node.addDependency("test-node-" + (i - 1));
+                }
+                return node;
+            })
+            .collect(Collectors.toList());
+    }
+
+    private Dag createTestDAG(List<TaskNode> nodes, String dagName) {
+        Dag dag = new Dag(dagName + "-" + System.currentTimeMillis());
+        nodes.forEach(dag::addNode);
+        return dag;
+    }
+
+    @Override
+    protected void initializeIntegrationTestData() {
+        System.out.println("Initializing concurrent playback integration test data...");
+    }
+
+    @Override
+    protected void cleanupIntegrationTestData() {
+        System.out.println("Cleaning up concurrent playback integration test data...");
+    }
+}
