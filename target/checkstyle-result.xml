@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="10.12.5">
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/grammar/AdvancedWorkflowPatternsTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="7" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="16" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/grammar/DemoScenariosIntegrationTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="7" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="16" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="19" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/grammar/AutomationGrammarTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="47" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="9" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="18" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/grammar/RuleEngineTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="47" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="9" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="17" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/grammar/IntentToPetriMapperTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="47" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="9" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="17" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="180" column="10" severity="warning" message="Abbreviation in name &apos;mapChoiceStepCreatesXORBranching&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="250" column="10" severity="warning" message="Abbreviation in name &apos;mapParallelStepCreatesANDSplit&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="289" column="10" severity="warning" message="Abbreviation in name &apos;mapSyncStepCreatesANDJoin&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="411" column="10" severity="warning" message="Abbreviation in name &apos;contextGeneratesUniqueIDsForMultipleSteps&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/simulation/TraceEventTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="17" severity="warning" message="First sentence of Javadoc is missing an ending period." source="com.puppycrawl.tools.checkstyle.checks.javadoc.SummaryJavadocCheck"/>
+<error line="19" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/simulation/SimulationConfigTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="11" severity="warning" message="First sentence of Javadoc is missing an ending period." source="com.puppycrawl.tools.checkstyle.checks.javadoc.SummaryJavadocCheck"/>
+<error line="13" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/simulation/PetriTokenSimulatorTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="47" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="18" severity="warning" message="First sentence of Javadoc is missing an ending period." source="com.puppycrawl.tools.checkstyle.checks.javadoc.SummaryJavadocCheck"/>
+<error line="20" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/simulation/PetriSimulationIntegrationTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="7" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="17" severity="warning" message="First sentence of Javadoc is missing an ending period." source="com.puppycrawl.tools.checkstyle.checks.javadoc.SummaryJavadocCheck"/>
+<error line="19" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="215" column="11" severity="warning" message="Abbreviation in name &apos;taskAIndex&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="216" column="11" severity="warning" message="Abbreviation in name &apos;taskBIndex&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/validation/PetriNetValidatorTest.java">
+<error line="5" column="47" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="34" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.mockito.Mockito.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="10" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="80" column="31" severity="warning" message="Distance between variable &apos;config&apos; declaration and its first usage is 4, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/validation/SimplePetriNetValidatorTest.java">
+<error line="5" column="47" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="34" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.mockito.Mockito.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="8" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="10" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="71" column="31" severity="warning" message="Distance between variable &apos;config&apos; declaration and its first usage is 4, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/projection/PetriToDagProjectorTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="9" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="10" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="16" severity="warning" message="First sentence of Javadoc is missing an ending period." source="com.puppycrawl.tools.checkstyle.checks.javadoc.SummaryJavadocCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/core/petri/projection/PetriToDagProjectorIntegrationTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="9" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="14" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="19" severity="warning" message="First sentence of Javadoc is missing an ending period." source="com.puppycrawl.tools.checkstyle.checks.javadoc.SummaryJavadocCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/integration/P3NetPipelineIntegrationTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="6" column="82" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="7" column="80" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.springframework.test.web.servlet.result.MockMvcResultMatchers.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="9" column="15" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - api.dto.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="11" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="15" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="18" column="29" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="32" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="41" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="88" column="7" severity="warning" message="Distance between variable &apos;pipelineStart&apos; declaration and its first usage is 30, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+<error line="252" column="7" severity="warning" message="Distance between variable &apos;pipelineStart&apos; declaration and its first usage is 14, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+<error line="320" column="7" severity="warning" message="Distance between variable &apos;report&apos; declaration and its first usage is 8, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+<error line="1208" column="7" severity="warning" message="Distance between variable &apos;minTime&apos; declaration and its first usage is 4, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+<error line="1296" column="11" severity="warning" message="Abbreviation in name &apos;totalE2EScenarios&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="1299" column="7" severity="warning" message="Distance between variable &apos;testStats&apos; declaration and its first usage is 5, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/utils/GoldenOutputGenerator.java">
+<error line="15" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="19" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="22" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="27" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="31" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="33" severity="warning" message="Line is longer than 100 characters (found 101)." source="com.puppycrawl.tools.checkstyle.checks.sizes.LineLengthCheck"/>
+<error line="34" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="54" column="3" severity="warning" message="Missing a Javadoc comment." source="com.puppycrawl.tools.checkstyle.checks.javadoc.MissingJavadocMethodCheck"/>
+<error line="370" column="5" severity="warning" message="&apos;if&apos; construct must use &apos;{}&apos;s." source="com.puppycrawl.tools.checkstyle.checks.blocks.NeedBracesCheck"/>
+<error line="398" column="5" severity="warning" message="&apos;if&apos; construct must use &apos;{}&apos;s." source="com.puppycrawl.tools.checkstyle.checks.blocks.NeedBracesCheck"/>
+<error line="421" column="5" severity="warning" message="&apos;if&apos; construct must use &apos;{}&apos;s." source="com.puppycrawl.tools.checkstyle.checks.blocks.NeedBracesCheck"/>
+<error line="451" column="3" severity="warning" message="Missing a Javadoc comment." source="com.puppycrawl.tools.checkstyle.checks.javadoc.MissingJavadocTypeCheck"/>
+<error line="467" column="3" severity="warning" message="Missing a Javadoc comment." source="com.puppycrawl.tools.checkstyle.checks.javadoc.MissingJavadocTypeCheck"/>
+<error line="472" column="5" severity="warning" message="Missing a Javadoc comment." source="com.puppycrawl.tools.checkstyle.checks.javadoc.MissingJavadocMethodCheck"/>
+</file>
+<file name="/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/tests/performance/P3NetPerformanceBenchmarkTest.java">
+<error line="5" column="46" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.assertj.core.api.Assertions.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="7" column="18" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - core.petri.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="15" column="17" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - java.util.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="20" column="29" severity="warning" message="Using the &apos;.*&apos; form of import should be avoided - org.junit.jupiter.api.*." source="com.puppycrawl.tools.checkstyle.checks.imports.AvoidStarImportCheck"/>
+<error line="26" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="34" severity="warning" message="Empty line should be followed by &lt;p&gt; tag on the next line." source="com.puppycrawl.tools.checkstyle.checks.javadoc.JavadocParagraphCheck"/>
+<error line="474" column="14" severity="warning" message="Abbreviation in name &apos;workflowMemoryMB&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="536" column="12" severity="warning" message="Abbreviation in name &apos;totalMemoryGrowthMB&apos; must contain no more than &apos;1&apos; consecutive capital letters." source="com.puppycrawl.tools.checkstyle.checks.naming.AbbreviationAsWordInNameCheck"/>
+<error line="554" column="7" severity="warning" message="Distance between variable &apos;complexities&apos; declaration and its first usage is 4, but allowed 3.  Consider making that variable final if you still need to store its value in advance (before method calls that might have side effects on the original value)." source="com.puppycrawl.tools.checkstyle.checks.coding.VariableDeclarationUsageDistanceCheck"/>
+</file>
+</checkstyle>

@@ -41,7 +41,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 #### Main Modules
 - **`core/`**: Core execution engine (`DagExecutor`, `DagValidator`, `TaskNode`, etc.)
-- **`api/`**: Spring Boot REST API layer with controllers and services  
+- **`api/`**: Spring Boot REST API layer with controllers and services
 - **`plugins/`**: Plugin system for extensible task execution
 - **`memory/`**: Memory management for execution context and state
 - **`cli/`**: Command-line interface (`ObvianCli`)

@@ -1,7 +1,7 @@
 package core.petri.validation;
 
 import core.petri.PetriNet;
-import core.petri.PetriNetValidationResult;
+import core.petri.validation.PetriNetValidationResult;
 import core.petri.Marking;
 import core.petri.Transition;
 import core.petri.Place;

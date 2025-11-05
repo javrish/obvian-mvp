@@ -925,7 +925,8 @@
                     <consoleOutput>true</consoleOutput>
                     <failsOnError>true</failsOnError>
                     <linkXRef>false</linkXRef>
-                    <violationSeverity>warning</violationSeverity>
+                    <violationSeverity>error</violationSeverity>
+                    <maxAllowedViolations>0</maxAllowedViolations>
                     <includeTestSourceDirectory>true</includeTestSourceDirectory>
                 </configuration>
                 <dependencies>

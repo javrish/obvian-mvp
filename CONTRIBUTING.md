@@ -26,10 +26,10 @@ Thank you for your interest in contributing to the Obvian Petri Net DAG proof-of
    ```bash
    # Install dependencies and run tests
    mvn clean install
-   
+
    # Start the Spring Boot application
    mvn spring-boot:run
-   
+
    # API will be available at http://localhost:8080
    ```
 
@@ -38,7 +38,7 @@ Thank you for your interest in contributing to the Obvian Petri Net DAG proof-of
    cd frontend
    npm install
    npm run dev
-   
+
    # Frontend will be available at http://localhost:5173
    ```
 
@@ -109,7 +109,7 @@ obvian-core/
  * reachability analysis, and liveness checking.
  */
 public class PetriNetValidator {
-    
+
     /**
      * Performs comprehensive validation of the given Petri net.
      *
@@ -165,10 +165,10 @@ void shouldDetectDeadlockWhenNoTransitionsEnabled() {
         .withTransition("t1")
         .withInitialMarking("p1", 0) // No tokens
         .build();
-    
+
     // When
     ValidationReport report = validator.validate(petriNet, defaultConfig);
-    
+
     // Then
     assertThat(report.getStatus()).isEqualTo(ValidationStatus.FAIL);
     assertThat(report.getChecks().get("deadlock").getResult())
@@ -185,11 +185,11 @@ Create a new template class in the appropriate domain package:
 ```java
 @Component
 public class BusinessProcessTemplate implements TemplateParser {
-    
+
     private static final Pattern APPROVAL_PATTERN = Pattern.compile(
         "(?i)submit\\s+(.+?)\\s+for\\s+approval.*?if\\s+approved\\s+(.+?)\\s+if\\s+rejected\\s+(.+)"
     );
-    
+
     @Override
     public ParseResult parse(String text) {
         Matcher matcher = APPROVAL_PATTERN.matcher(text);
@@ -198,7 +198,7 @@ public class BusinessProcessTemplate implements TemplateParser {
         }
         return ParseResult.failure("Pattern not recognized as business approval process");
     }
-    
+
     private IntentSpec buildApprovalIntent(Matcher matcher) {
         return IntentSpec.builder()
             .name("Business Approval Process")
@@ -217,15 +217,15 @@ Create comprehensive tests for the new template:
 
 ```java
 class BusinessProcessTemplateTest {
-    
+
     @Test
     void shouldParseApprovalWorkflow() {
         // Given
         String input = "Submit expense report for approval; if approved process payment; if rejected notify submitter";
-        
+
         // When
         ParseResult result = template.parse(input);
-        
+
         // Then
         assertThat(result.isSuccess()).isTrue();
         IntentSpec intent = result.getIntentSpec();
@@ -233,15 +233,15 @@ class BusinessProcessTemplateTest {
         assertThat(intent.getSteps().get(0).getType()).isEqualTo(StepType.ACTION);
         assertThat(intent.getSteps().get(1).getType()).isEqualTo(StepType.CHOICE);
     }
-    
+
     @Test
     void shouldProvideHelpfulErrorForUnsupportedPattern() {
         // Given
         String input = "Do something complex without clear structure";
-        
+
         // When
         ParseResult result = template.parse(input);
-        
+
         // Then
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrors()).contains("Pattern not recognized");
@@ -257,13 +257,13 @@ Add the template to the parser registry:
 ```java
 @Configuration
 public class TemplateConfiguration {
-    
+
     @Bean
     public TemplateRegistry templateRegistry(
             DevOpsTemplate devOpsTemplate,
             FootballTemplate footballTemplate,
             BusinessProcessTemplate businessProcessTemplate) {
-        
+
         return TemplateRegistry.builder()
             .register("devops", devOpsTemplate)
             .register("football", footballTemplate)
@@ -294,13 +294,13 @@ Add golden file tests for the complete flow:
 void shouldProcessBusinessApprovalEndToEnd() {
     // Given
     String input = "Submit expense report for approval; if approved process payment; if rejected notify submitter";
-    
+
     // When - Complete flow
     ParseResult parseResult = parser.parse(input);
     BuildResult buildResult = builder.build(parseResult.getIntentSpec());
     ValidationReport validationReport = validator.validate(buildResult.getPetriNet(), defaultConfig);
     SimulationResult simulationResult = simulator.simulate(buildResult.getPetriNet(), deterministicConfig);
-    
+
     // Then - Compare with golden files
     assertThat(parseResult).matchesGoldenFile("business-approval-parse.json");
     assertThat(buildResult.getPetriNet()).matchesGoldenFile("business-approval-petri.json");
@@ -341,10 +341,10 @@ Use jqwik for testing algorithmic properties:
 void tokenConservationDuringSimulation(@ForAll("validPetriNets") PetriNet petriNet) {
     // Given
     int initialTokens = petriNet.getInitialMarking().getTotalTokens();
-    
+
     // When
     SimulationResult result = simulator.simulate(petriNet, deterministicConfig);
-    
+
     // Then - Token count should be conserved throughout execution
     for (TraceEvent event : result.getTrace()) {
         int tokensAfter = event.getMarkingAfter().getTotalTokens();

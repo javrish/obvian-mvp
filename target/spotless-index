@@ -1,0 +1,21 @@
+bP8zkGY31kF0ZgbqAZvZHs2MeEnyvl36pwVoii+ScIE=
+CLAUDE.md 2025-11-05T13:05:13.896044907Z
+CONTRIBUTING.md 2025-11-05T13:05:13.892382537Z
+LICENSE.md 2025-09-07T15:21:51.217317939Z
+README.md 2025-11-05T12:40:33.723540527Z
+tests/core/petri/grammar/AdvancedWorkflowPatternsTest.java 2025-11-05T13:05:14.153928898Z
+tests/core/petri/grammar/AutomationGrammarTest.java 2025-11-05T13:05:14.243196321Z
+tests/core/petri/grammar/DemoScenariosIntegrationTest.java 2025-11-05T13:05:14.201219710Z
+tests/core/petri/grammar/IntentToPetriMapperTest.java 2025-11-05T13:05:14.340683150Z
+tests/core/petri/grammar/RuleEngineTest.java 2025-11-05T13:05:14.282347394Z
+tests/core/petri/projection/PetriToDagProjectorIntegrationTest.java 2025-11-05T13:05:14.587103280Z
+tests/core/petri/projection/PetriToDagProjectorTest.java 2025-11-05T13:05:14.553326034Z
+tests/core/petri/simulation/PetriSimulationIntegrationTest.java 2025-11-05T13:05:14.463732320Z
+tests/core/petri/simulation/PetriTokenSimulatorTest.java 2025-11-05T13:05:14.410108183Z
+tests/core/petri/simulation/SimulationConfigTest.java 2025-11-05T13:05:14.382803761Z
+tests/core/petri/simulation/TraceEventTest.java 2025-11-05T13:05:14.364916868Z
+tests/core/petri/validation/PetriNetValidatorTest.java 2025-11-05T13:05:14.487002122Z
+tests/core/petri/validation/SimplePetriNetValidatorTest.java 2025-11-05T13:05:14.504116724Z
+tests/integration/P3NetPipelineIntegrationTest.java 2025-11-05T13:05:14.718368897Z
+tests/performance/P3NetPerformanceBenchmarkTest.java 2025-11-05T13:05:14.818392598Z
+tests/utils/GoldenOutputGenerator.java 2025-11-05T13:05:14.762494005Z
