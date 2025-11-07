@@ -1,11 +1,12 @@
 package api.config;
 
 import core.petri.grammar.AutomationGrammar;
+import core.petri.grammar.GitHubActionsParser;
 import core.petri.grammar.IntentToPetriMapper;
 import core.petri.grammar.RuleEngine;
+import core.petri.simulation.PetriTokenSimulator;
 import core.petri.validation.PetriNetValidator;
 import core.petri.validation.SimplePetriNetValidator;
-import core.petri.simulation.PetriTokenSimulator;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -60,5 +61,13 @@ public class PetriConfiguration {
     @Bean
     public PetriTokenSimulator petriTokenSimulator() {
         return new PetriTokenSimulator();
+    }
+
+    /**
+     * GitHub Actions parser for workflow YAML parsing
+     */
+    @Bean
+    public GitHubActionsParser gitHubActionsParser() {
+        return new GitHubActionsParser();
     }
 }
