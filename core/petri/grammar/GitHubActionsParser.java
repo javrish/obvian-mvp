@@ -74,6 +74,9 @@ public class GitHubActionsParser {
               .modelType(PetriIntentSpec.MODEL_TYPE)
               .originalPrompt(yamlContent);
 
+      // Validate job names for reserved keywords
+      validateJobNames(jobs.keySet());
+
       // Process each job
       for (Map.Entry<String, Object> jobEntry : jobs.entrySet()) {
         String jobId = jobEntry.getKey();
@@ -82,6 +85,9 @@ public class GitHubActionsParser {
 
         processJob(specBuilder, jobId, jobDef);
       }
+
+      // Validate dependencies after all jobs are processed
+      validateDependencies(jobs, yamlContent);
 
       return specBuilder.build();
 
@@ -215,30 +221,214 @@ public class GitHubActionsParser {
   }
 
   /**
+   * Validates job names for reserved keywords.
+   */
+  private void validateJobNames(Set<String> jobNames) throws ParseException {
+    Set<String> reserved = Set.of("on", "name", "jobs", "env", "defaults", "concurrency");
+    for (String jobName : jobNames) {
+      if (reserved.contains(jobName)) {
+        throw new ParseException(
+            "Job name '" + jobName + "' is a reserved keyword",
+            0,
+            "Rename the job to something like 'job-" + jobName + "' or '" + jobName + "-job'",
+            null);
+      }
+    }
+  }
+
+  /**
+   * Validates dependencies between jobs.
+   */
+  @SuppressWarnings("unchecked")
+  private void validateDependencies(Map<String, Object> jobs, String yamlContent)
+      throws ParseException {
+    Map<String, List<String>> dependencies = new HashMap<>();
+
+    // Extract all dependencies
+    for (Map.Entry<String, Object> jobEntry : jobs.entrySet()) {
+      String jobId = jobEntry.getKey();
+      Map<String, Object> jobDef = (Map<String, Object>) jobEntry.getValue();
+      List<String> deps = extractDependencies(jobDef);
+      dependencies.put(jobId, deps);
+
+      // Check for missing dependencies
+      for (String dep : deps) {
+        if (!jobs.containsKey(dep)) {
+          String yamlContext = extractYamlContext(yamlContent, jobId);
+          throw new ParseException(
+              "Job '" + jobId + "' depends on '" + dep + "' which does not exist",
+              findJobLineNumber(yamlContent, jobId),
+              "Add job '" + dep + "' or remove it from the 'needs' list of '" + jobId + "'",
+              yamlContext);
+        }
+      }
+    }
+
+    // Check for circular dependencies
+    detectCircularDependencies(dependencies);
+  }
+
+  /**
+   * Detects circular dependencies using DFS.
+   */
+  private void detectCircularDependencies(Map<String, List<String>> dependencies)
+      throws ParseException {
+    Set<String> visited = new HashSet<>();
+    Set<String> recStack = new HashSet<>();
+    List<String> cyclePath = new ArrayList<>();
+
+    for (String job : dependencies.keySet()) {
+      cyclePath.clear();
+      if (hasCycle(job, dependencies, visited, recStack, cyclePath)) {
+        String cycle = String.join(" → ", cyclePath);
+        throw new ParseException(
+            "Circular dependency detected in workflow: " + cycle,
+            0,
+            "Review the 'needs' relationships to remove the cycle",
+            null);
+      }
+    }
+  }
+
+  private boolean hasCycle(
+      String job,
+      Map<String, List<String>> dependencies,
+      Set<String> visited,
+      Set<String> recStack,
+      List<String> path) {
+    if (recStack.contains(job)) {
+      // Found cycle - add the job that completes the cycle
+      path.add(job);
+      return true;
+    }
+    if (visited.contains(job)) {
+      return false;
+    }
+
+    visited.add(job);
+    recStack.add(job);
+    path.add(job);
+
+    List<String> deps = dependencies.getOrDefault(job, Collections.emptyList());
+    for (String dep : deps) {
+      // Pass the same path list so we can track the cycle
+      if (hasCycle(dep, dependencies, visited, recStack, path)) {
+        return true;
+      }
+    }
+
+    recStack.remove(job);
+    // Only remove from path if no cycle found through this node
+    if (!path.isEmpty() && path.get(path.size() - 1).equals(job)) {
+      path.remove(path.size() - 1);
+    }
+    return false;
+  }
+
+  /**
+   * Extracts YAML context around a specific job.
+   */
+  private String extractYamlContext(String yamlContent, String jobId) {
+    String[] lines = yamlContent.split("\n");
+    int jobLine = findJobLineNumber(yamlContent, jobId);
+
+    if (jobLine < 0) {
+      return "";
+    }
+
+    // Show 3 lines before and after
+    int start = Math.max(0, jobLine - 3);
+    int end = Math.min(lines.length, jobLine + 4);
+
+    StringBuilder context = new StringBuilder();
+    for (int i = start; i < end; i++) {
+      String prefix = (i == jobLine) ? ">>> " : "    ";
+      context.append(String.format("%s%3d | %s\n", prefix, i + 1, lines[i]));
+    }
+
+    return context.toString();
+  }
+
+  /**
+   * Finds the line number where a job is defined.
+   */
+  private int findJobLineNumber(String yamlContent, String jobId) {
+    String[] lines = yamlContent.split("\n");
+    for (int i = 0; i < lines.length; i++) {
+      // Look for job ID as a key at the jobs level
+      if (lines[i].trim().startsWith(jobId + ":")) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /**
    * Exception thrown when parsing fails.
    */
   public static class ParseException extends Exception {
     private final int lineNumber;
+    private final String fixSuggestion;
+    private final String yamlContext;
 
     public ParseException(String message, int lineNumber) {
-      super(formatMessage(message, lineNumber));
-      this.lineNumber = lineNumber;
+      this(message, lineNumber, null, null, null);
     }
 
     public ParseException(String message, int lineNumber, Throwable cause) {
-      super(formatMessage(message, lineNumber), cause);
-      this.lineNumber = lineNumber;
+      this(message, lineNumber, null, null, cause);
     }
 
-    private static String formatMessage(String message, int lineNumber) {
+    public ParseException(
+        String message, int lineNumber, String fixSuggestion, String yamlContext) {
+      this(message, lineNumber, fixSuggestion, yamlContext, null);
+    }
+
+    public ParseException(
+        String message,
+        int lineNumber,
+        String fixSuggestion,
+        String yamlContext,
+        Throwable cause) {
+      super(formatMessage(message, lineNumber, fixSuggestion, yamlContext), cause);
+      this.lineNumber = lineNumber;
+      this.fixSuggestion = fixSuggestion != null ? fixSuggestion : "";
+      this.yamlContext = yamlContext != null ? yamlContext : "";
+    }
+
+    private static String formatMessage(
+        String message, int lineNumber, String fixSuggestion, String yamlContext) {
+      StringBuilder sb = new StringBuilder();
+
+      // Add line number prefix
       if (lineNumber > 0) {
-        return "Line " + lineNumber + ": " + message;
+        sb.append("Line ").append(lineNumber).append(": ");
       }
-      return message;
+      sb.append(message);
+
+      // Add YAML context
+      if (yamlContext != null && !yamlContext.isEmpty()) {
+        sb.append("\n\nContext:\n").append(yamlContext);
+      }
+
+      // Add fix suggestion
+      if (fixSuggestion != null && !fixSuggestion.isEmpty()) {
+        sb.append("\n\n💡 Suggestion: ").append(fixSuggestion);
+      }
+
+      return sb.toString();
     }
 
     public int getLineNumber() {
       return lineNumber;
+    }
+
+    public String getFixSuggestion() {
+      return fixSuggestion;
+    }
+
+    public String getYamlContext() {
+      return yamlContext;
     }
   }
 }
