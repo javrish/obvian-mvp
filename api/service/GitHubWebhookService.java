@@ -1,9 +1,8 @@
 package api.service;
 
 import api.dto.GitHubWebhookPayload;
+import api.service.WorkflowVerificationService.WorkflowVerificationResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import core.petri.PetriIntentSpec;
-import core.petri.grammar.GitHubActionsParser;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.slf4j.Logger;
@@ -23,14 +22,16 @@ public class GitHubWebhookService {
 
   private final ObjectMapper objectMapper;
   private final GitHubApiClient githubClient;
-  private final GitHubActionsParser parser;
+  private final WorkflowVerificationService verificationService;
   private final ExecutorService executor;
 
   public GitHubWebhookService(
-      ObjectMapper objectMapper, GitHubApiClient githubClient, GitHubActionsParser parser) {
+      ObjectMapper objectMapper,
+      GitHubApiClient githubClient,
+      WorkflowVerificationService verificationService) {
     this.objectMapper = objectMapper;
     this.githubClient = githubClient;
-    this.parser = parser;
+    this.verificationService = verificationService;
     this.executor = Executors.newFixedThreadPool(10); // Pool for async webhook processing
   }
 
@@ -110,18 +111,23 @@ public class GitHubWebhookService {
     // Fetch workflow YAML
     String yamlContent = githubClient.getWorkflowFile(owner, repo, path, sha);
 
-    // Parse workflow
-    PetriIntentSpec spec = parser.parse(yamlContent);
+    // Run full verification pipeline
+    WorkflowVerificationResult result = verificationService.verifyWorkflow(yamlContent, path);
 
-    logger.info(
-        "Successfully parsed workflow {} (delivery={}): {} steps",
-        path,
-        deliveryId,
-        spec.getSteps().size());
-
-    // TODO: Build Petri net and validate (will be implemented in VALIDATION-1)
-    // For now, just log success
-    logger.info("Workflow {} verified successfully (delivery={})", path, deliveryId);
+    if (result.isPassed()) {
+      logger.info(
+          "Workflow {} PASSED verification (delivery={}, duration={}ms)",
+          path,
+          deliveryId,
+          result.getVerificationDurationMs());
+    } else {
+      logger.warn(
+          "Workflow {} FAILED verification (delivery={}, duration={}ms, status={})",
+          path,
+          deliveryId,
+          result.getVerificationDurationMs(),
+          result.getValidationResult().getPetriStatus());
+    }
   }
 
   /**
