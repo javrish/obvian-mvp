@@ -3,11 +3,9 @@
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PetriSecurityConfig.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PluginConfiguration.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PocSecurityConfiguration.java
-/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/GitHubWebhookController.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/HealthController.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/PetriController.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/WebhookController.java
-/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/GitHubWebhookPayload.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriBuildRequest.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriBuildResponse.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriDagRequest.java
@@ -21,7 +19,6 @@
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/model/CloudflareAnalytics.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/GitHubApiClient.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/GitHubCheckRunService.java
-/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/GitHubWebhookService.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/WorkflowVerificationService.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/security/AuthorizationService.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/BusinessRule.java

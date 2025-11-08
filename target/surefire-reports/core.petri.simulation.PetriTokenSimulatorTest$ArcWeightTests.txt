@@ -1,8 +1,8 @@
 -------------------------------------------------------------------------------
 Test set: core.petri.simulation.PetriTokenSimulatorTest$ArcWeightTests
 -------------------------------------------------------------------------------
-Tests run: 2, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.011 s <<< FAILURE! - in core.petri.simulation.PetriTokenSimulatorTest$ArcWeightTests
-core.petri.simulation.PetriTokenSimulatorTest$ArcWeightTests.shouldBlockWhenInsufficientTokensForWeightedArc  Time elapsed: 0.008 s  <<< FAILURE!
+Tests run: 2, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.008 s <<< FAILURE! - in core.petri.simulation.PetriTokenSimulatorTest$ArcWeightTests
+core.petri.simulation.PetriTokenSimulatorTest$DeadlockDetectionTests.shouldDetectDeadlockWhenNoTransitionsEnabled  Time elapsed: 0.003 s  <<< FAILURE!
 org.opentest4j.AssertionFailedError: 
 
 Expecting value to be true but was false
@@ -10,7 +10,7 @@ Expecting value to be true but was false
 	at java.base/jdk.internal.reflect.NativeConstructorAccessorImpl.newInstance(NativeConstructorAccessorImpl.java:77)
 	at java.base/jdk.internal.reflect.DelegatingConstructorAccessorImpl.newInstance(DelegatingConstructorAccessorImpl.java:45)
 	at java.base/java.lang.reflect.Constructor.newInstanceWithCaller(Constructor.java:500)
-	at core.petri.simulation.PetriTokenSimulatorTest$ArcWeightTests.shouldBlockWhenInsufficientTokensForWeightedArc(PetriTokenSimulatorTest.java:538)
+	at core.petri.simulation.PetriTokenSimulatorTest$DeadlockDetectionTests.shouldDetectDeadlockWhenNoTransitionsEnabled(PetriTokenSimulatorTest.java:218)
 	at java.base/java.lang.reflect.Method.invoke(Method.java:569)
 	at java.base/java.util.concurrent.RecursiveAction.exec(RecursiveAction.java:194)
 	at java.base/java.util.concurrent.ForkJoinTask.doExec(ForkJoinTask.java:373)

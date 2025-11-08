@@ -26,20 +26,16 @@ api/config/PocSecurityConfiguration$PocWarningFilter.class
 api/service/WorkflowVerificationService.class
 core/ValidationWarningType.class
 tests/api/model/CloudflareAnalytics.class
-api/dto/GitHubWebhookPayload.class
 core/RuleDependency$Common.class
 api/dto/PetriDagResponse.class
 core/RuleConflict$ConflictSeverity.class
-api/dto/GitHubWebhookPayload$Base.class
 core/petri/builder/PetriNetBuilder.class
 core/RuleConflict$ConflictImpactAnalysis.class
 api/controller/PetriController.class
 api/dto/PetriDagResponse$DAGNode.class
-api/dto/GitHubWebhookPayload$Owner.class
 core/ValidationResult$PerformanceMetrics$Builder.class
 core/RuleDependency$DependencyType.class
 core/petri/Arc.class
-api/service/GitHubWebhookService.class
 core/petri/simulation/SimulationState.class
 core/RuleDependency$1.class
 core/petri/grammar/AutomationGrammar$TransformationConfig.class
@@ -57,7 +53,6 @@ core/RuleConflict$ConflictType.class
 core/petri/validation/PetriNetValidationResult$CounterExample.class
 core/DagValidationResult.class
 api/dto/PetriSimulateRequest$SimulationConfig.class
-api/dto/GitHubWebhookPayload$Head.class
 core/ExecutionResult.class
 core/RuleDependency$ValidationStatus.class
 core/RuleCondition$Builder.class
@@ -126,7 +121,6 @@ plugins/PluginValidationResult.class
 core/MetricsCollector.class
 core/ValidationIssue$Builder.class
 core/petri/simulation/TraceEvent.class
-api/controller/GitHubWebhookController.class
 core/petri/builder/PetriNetBuilder$IntentToPetriMapper.class
 core/petri/validation/SimplePetriNetValidator$ReachabilityAnalysisResult.class
 core/BusinessRule$1.class
@@ -155,7 +149,6 @@ core/petri/PetriIntentSpec$Builder.class
 core/ValidationResult.class
 core/petri/simulation/TraceEvent$EventType.class
 core/petri/simulation/SimulationConfig$Builder.class
-api/dto/GitHubWebhookPayload$Repository.class
 plugins/PluginRegistry.class
 core/ValidationIssue$IssueType.class
 core/petri/grammar/GitHubActionsParser$ParseException.class
@@ -197,7 +190,6 @@ core/ValidationResult$PerformanceMetrics.class
 core/petri/validation/PetriNetValidationResult$CheckResult.class
 core/petri/PetriIntentSpec.class
 api/config/PetriSecurityConfig.class
-api/dto/GitHubWebhookPayload$PullRequest.class
 core/petri/Transition.class
 core/BusinessRule$RuleType.class
 plugins/github/GitHubPlugin.class

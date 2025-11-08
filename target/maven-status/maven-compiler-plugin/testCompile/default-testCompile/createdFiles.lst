@@ -12,7 +12,6 @@ core/petri/simulation/PetriSimulationIntegrationTest$PerformanceAndScalabilityTe
 core/petri/simulation/PetriTokenSimulatorTest$ArcWeightTests.class
 core/petri/simulation/PetriSimulationIntegrationTest$DeterministicExecutionTests.class
 tests/api/service/WorkflowVerificationServiceTest.class
-tests/api/controller/GitHubWebhookControllerTest.class
 core/petri/simulation/PetriSimulationIntegrationTest.class
 tests/core/petri/grammar/GitHubActionsParserErrorTest.class
 core/petri/simulation/SimulationConfigTest$JsonConstructorTests.class
