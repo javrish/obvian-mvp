@@ -58,4 +58,29 @@ public class PluginValidationResult {
     public boolean hasWarnings() {
         return !warnings.isEmpty();
     }
+
+    // Builder
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static class Builder {
+        private final List<String> errors = new ArrayList<>();
+        private final List<String> warnings = new ArrayList<>();
+
+        public Builder addError(String error) {
+            this.errors.add(error);
+            return this;
+        }
+
+        public Builder addWarning(String warning) {
+            this.warnings.add(warning);
+            return this;
+        }
+
+        public PluginValidationResult build() {
+            boolean valid = errors.isEmpty();
+            return new PluginValidationResult(valid, errors, warnings);
+        }
+    }
 }

@@ -1,9 +1,13 @@
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/ObvianApplication.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PetriConfiguration.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PetriSecurityConfig.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PluginConfiguration.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/config/PocSecurityConfiguration.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/GitHubWebhookController.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/HealthController.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/PetriController.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/controller/WebhookController.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/GitHubWebhookPayload.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriBuildRequest.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriBuildResponse.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriDagRequest.java
@@ -15,6 +19,10 @@
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriSimulateRequest.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/dto/PetriValidateRequest.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/model/CloudflareAnalytics.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/GitHubApiClient.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/GitHubCheckRunService.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/GitHubWebhookService.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/WorkflowVerificationService.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/api/service/security/AuthorizationService.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/BusinessRule.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/BusinessRuleContext.java
@@ -56,6 +64,7 @@
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/builder/PetriNetBuilder.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/builder/PetriNetBuilderMinimal.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/grammar/AutomationGrammar.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/grammar/GitHubActionsParser.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/grammar/IntentToPetriMapper.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/grammar/RuleEngine.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/core/petri/projection/PetriToDagProjector.java
@@ -75,3 +84,5 @@
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/plugins/PluginRegistry.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/plugins/PluginResult.java
 /Users/rishabhpathak/base/Obvian-repos/obvian-mvp/plugins/PluginValidationResult.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/plugins/WebhookPlugin.java
+/Users/rishabhpathak/base/Obvian-repos/obvian-mvp/plugins/github/GitHubPlugin.java
